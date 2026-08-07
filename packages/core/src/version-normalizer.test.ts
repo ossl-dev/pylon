@@ -38,7 +38,23 @@ describe('VersionNormalizer', () => {
         { format: 'date-daily' },
         '2024-03-15',
       );
-      expect(n.normalize('2024-03-15')).toBe(1);
+      // Current version is the last in the generated range (order > 1)
+      const order = n.normalize('2024-03-15');
+      expect(order).toBeGreaterThan(1);
+      expect(n.getCurrentVersion()).toBe('2024-03-15');
+      expect(n.denormalize(order!)).toBe('2024-03-15');
+    });
+
+    it('generates multiple versions from start to current', () => {
+      const n = new VersionNormalizer(
+        { format: 'date-daily' },
+        '2024-03-15',
+      );
+      const versions = n.listVersions();
+      expect(versions.length).toBeGreaterThan(1);
+      // Versions are sorted by order (ascending date)
+      expect(versions[0].order).toBe(1);
+      expect(versions[versions.length - 1].name).toBe('2024-03-15');
     });
   });
 
@@ -48,7 +64,10 @@ describe('VersionNormalizer', () => {
         { format: 'calver', calverFormat: 'YYYY.MM' },
         '2024.03',
       );
-      expect(n.normalize('2024.03')).toBe(1);
+      // Calver uses monthly generation — current is last in the range
+      const order = n.normalize('2024.03');
+      expect(order).toBeGreaterThan(1);
+      expect(n.getCurrentVersion()).toBe('2024.03');
     });
   });
 
@@ -108,8 +127,16 @@ describe('VersionNormalizer', () => {
   describe('stripe preset', () => {
     it('initializes from Stripe preset with date', () => {
       const n = new VersionNormalizer({ preset: 'stripe' }, '2024-03-15');
-      expect(n.normalize('2024-03-15')).toBe(1);
+      const order = n.normalize('2024-03-15');
+      expect(order).toBeGreaterThan(1);
       expect(n.getCurrentVersion()).toBe('2024-03-15');
+    });
+
+    it('generates multiple versions for Stripe preset', () => {
+      const n = new VersionNormalizer({ preset: 'stripe' }, '2024-03-15');
+      const versions = n.listVersions();
+      expect(versions.length).toBeGreaterThan(1);
+      expect(versions[versions.length - 1].name).toBe('2024-03-15');
     });
   });
 

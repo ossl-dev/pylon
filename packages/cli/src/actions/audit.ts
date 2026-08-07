@@ -62,7 +62,7 @@ export async function auditAction(path: string): Promise<void> {
 /**
  * Scan the codebase and produce an audit result.
  */
-function scanCodebase(rootDir: string): AuditResult {
+export function scanCodebase(rootDir: string): AuditResult {
   const allEndpoints: AuditResult['endpoints'] = [];
   const patternCounts = new Map<string, number>();
   const versionSet = new Set<string>();
@@ -105,7 +105,11 @@ function scanCodebase(rootDir: string): AuditResult {
             routeMethods.push(method);
           }
         }
-        if (routeRegex.lastIndex > 0) patternCounts.set('route_handlers', (patternCounts.get('route_handlers') ?? 0) + routeMethods.length);
+        // Note: routeRegex.lastIndex cannot be used to detect matches —
+        // exec() resets it to 0 when it returns null.
+        if (routeMethods.length > 0) {
+          patternCounts.set('route_handlers', (patternCounts.get('route_handlers') ?? 0) + routeMethods.length);
+        }
 
         // Detect versions in paths
         const pathVersions: string[] = [];
@@ -198,7 +202,7 @@ function pathToRelative(rootDir: string, fullPath: string): string {
 /**
  * Generate actionable suggestions based on audit findings.
  */
-function generateSuggestions(
+export function generateSuggestions(
   _endpoints: AuditResult['endpoints'],
   detectedVersions: string[],
 ): string[] {

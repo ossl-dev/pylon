@@ -77,6 +77,8 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
 
     // In shadow mode, log and continue without modifying
     if (options?.shadow) {
+      // Set Pylon response headers even in shadow mode
+      setHeaders(ctx, result.headers);
       // biome-ignore lint: shadow mode diagnostic logging
       console.log(`[pylon:shadow] ${ctx.method} ${ctx.path}`);
       // biome-ignore lint: shadow mode diagnostic logging

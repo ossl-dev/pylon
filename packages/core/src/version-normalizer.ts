@@ -94,28 +94,34 @@ export class VersionNormalizer {
         }
         break;
       }
-      case 'date-monthly':
+      case 'date-monthly': {
+        const versions = generateDateVersions(current, 'monthly', formatCfg.dateFormat);
+        versions.forEach((v, i) => {
+          const order = i + 1;
+          this.versions.push({ name: v, order });
+          this.versionMap.set(v, order);
+          this.reverseMap.set(order, v);
+        });
+        break;
+      }
       case 'date-daily': {
-        // For date formats, we generate versions based on common patterns
-        // The current version should be a date string. We generate versions
-        // from a reasonable starting point up to current.
-        const currentDate = new Date(current);
-        if (isNaN(currentDate.getTime())) {
-          this.versions.push({ name: current, order: 1 });
-          this.versionMap.set(current, 1);
-          this.reverseMap.set(1, current);
-          return;
-        }
-        this.versions.push({ name: current, order: 1 });
-        this.versionMap.set(current, 1);
-        this.reverseMap.set(1, current);
+        const versions = generateDateVersions(current, 'daily', formatCfg.dateFormat);
+        versions.forEach((v, i) => {
+          const order = i + 1;
+          this.versions.push({ name: v, order });
+          this.versionMap.set(v, order);
+          this.reverseMap.set(order, v);
+        });
         break;
       }
       case 'calver': {
-        // Calendar versioning - store as single version for now
-        this.versions.push({ name: current, order: 1 });
-        this.versionMap.set(current, 1);
-        this.reverseMap.set(1, current);
+        const versions = generateDateVersions(current, 'monthly', formatCfg.calverFormat);
+        versions.forEach((v, i) => {
+          const order = i + 1;
+          this.versions.push({ name: v, order });
+          this.versionMap.set(v, order);
+          this.reverseMap.set(order, v);
+        });
         break;
       }
       default:
@@ -145,16 +151,13 @@ export class VersionNormalizer {
    * Initialize with Stripe preset (date-daily with YYYY-MM-DD).
    */
   private initStripe(current: string): void {
-    const currentDate = new Date(current);
-    if (isNaN(currentDate.getTime())) {
-      this.versions.push({ name: current, order: 1 });
-      this.versionMap.set(current, 1);
-      this.reverseMap.set(1, current);
-      return;
-    }
-    this.versions.push({ name: current, order: 1 });
-    this.versionMap.set(current, 1);
-    this.reverseMap.set(1, current);
+    const versions = generateDateVersions(current, 'daily');
+    versions.forEach((v, i) => {
+      const order = i + 1;
+      this.versions.push({ name: v, order });
+      this.versionMap.set(v, order);
+      this.reverseMap.set(order, v);
+    });
   }
 
   /**
@@ -271,4 +274,60 @@ export class VersionNormalizer {
   listVersions(): readonly VersionDefinition[] {
     return this.versions;
   }
+}
+
+/**
+ * Generate date-based version strings from a start date to the current date.
+ *
+ * For 'monthly': generates YYYY-MM from the earliest reasonable start to current.
+ * For 'daily': generates YYYY-MM-DD from the earliest reasonable start to current.
+ *
+ * Without an explicit start date in config, we use a 12-month lookback window
+ * (the current month minus 12 months for monthly, or the current date minus 365
+ * days for daily) as a reasonable default.
+ */
+function generateDateVersions(
+  current: string,
+  granularity: 'monthly' | 'daily',
+  originalFormat?: string,
+): string[] {
+  // Normalize calver dot notation to ISO format for parsing
+  const normalized = current.replace(/\./g, '-');
+  const currentDate = new Date(normalized);
+  if (isNaN(currentDate.getTime())) {
+    return [current];
+  }
+
+  // Determine date separator: dash for standard, dot for calver
+  const sep = originalFormat?.includes('.') ? '.' : '-';
+
+  const versions: string[] = [];
+  const isMonthly = granularity === 'monthly';
+
+  // Start from 12 months / 365 days back
+  const start = new Date(currentDate);
+  if (isMonthly) {
+    start.setMonth(start.getMonth() - 12);
+    start.setDate(1);
+  } else {
+    start.setDate(start.getDate() - 365);
+  }
+
+  const cursor = new Date(start);
+  while (cursor <= currentDate) {
+    if (isMonthly) {
+      const y = cursor.getFullYear();
+      const m = String(cursor.getMonth() + 1).padStart(2, '0');
+      versions.push(`${y}${sep}${m}`);
+      cursor.setMonth(cursor.getMonth() + 1);
+    } else {
+      const y = cursor.getFullYear();
+      const m = String(cursor.getMonth() + 1).padStart(2, '0');
+      const d = String(cursor.getDate()).padStart(2, '0');
+      versions.push(`${y}${sep}${m}${sep}${d}`);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+
+  return versions;
 }

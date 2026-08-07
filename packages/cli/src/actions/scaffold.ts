@@ -108,7 +108,7 @@ export async function scaffoldAction(path: string, options: ScaffoldOptions): Pr
 /**
  * Scan the codebase recursively for version strings and patterns.
  */
-function detectVersions(dir: string): string[] {
+export function detectVersions(dir: string): string[] {
   const versions: string[] = [];
   const skipDirs = new Set(['node_modules', 'dist', '.git', '.next', 'build', 'coverage']);
 
@@ -253,6 +253,6 @@ export default transform;
 /**
  * Sanitize a version string for use as a filename.
  */
-function sanitizeFilename(name: string): string {
+export function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_');
 }

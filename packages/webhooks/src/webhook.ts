@@ -345,7 +345,7 @@ export class PylonWebhook {
           'X-Webhook-Event': event,
           'X-Webhook-Version': version,
           ...(registration.secret
-            ? { 'X-Webhook-Signature': this.signPayload(body, registration.secret) }
+            ? { 'X-Webhook-Signature': await this.signPayload(body, registration.secret) }
             : {}),
           ...(registration.headers ?? {}),
         },
@@ -393,20 +393,24 @@ export class PylonWebhook {
   }
 
   /**
-   * Simple signature for webhook payload body integrity.
+   * Sign a webhook payload with HMAC-SHA256.
    *
-   * Uses a basic algorithm with the shared secret to produce a hex string
-   * that consumers can verify. This is not cryptographically secure HMAC —
-   * in production, replace with a proper HMAC-SHA256 implementation
-   * when a `secret` is configured on the registration.
+   * Uses the Web Crypto API (available in Node 18+, Bun, Deno, and browsers)
+   * to produce a hex-encoded HMAC-SHA256 signature. Consumers with the shared
+   * secret can verify payload integrity by computing the same HMAC.
    */
-  private signPayload(body: string, secret: string): string {
-    const combined = `${secret}${body}${secret}`;
-    let hash = 0;
-    for (let i = 0; i < combined.length; i++) {
-      const char = combined.charCodeAt(i);
-      hash = ((hash << 5) - hash + char) | 0;
-    }
-    return Math.abs(hash).toString(16).padStart(8, '0');
+  private async signPayload(body: string, secret: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
+    return Array.from(new Uint8Array(signature))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 }

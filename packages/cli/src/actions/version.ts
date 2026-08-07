@@ -7,7 +7,7 @@ import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
  * If it is a format/preset definition, a flat array is derived from the
  * config's current version (single entry).
  */
-function ensureVersionsArray(config: PylonConfig): VersionDefinition[] {
+export function ensureVersionsArray(config: PylonConfig): VersionDefinition[] {
   if (Array.isArray(config.versions)) {
     return config.versions;
   }
@@ -30,7 +30,7 @@ function ensureVersionsArray(config: PylonConfig): VersionDefinition[] {
 /**
  * Sort versions by their order field.
  */
-function sortVersions(versions: VersionDefinition[]): VersionDefinition[] {
+export function sortVersions(versions: VersionDefinition[]): VersionDefinition[] {
   return [...versions].sort((a, b) => a.order - b.order);
 }
 

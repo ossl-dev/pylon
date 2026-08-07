@@ -112,15 +112,20 @@ export function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): SchemaObject {
 
 	if (zodSchema instanceof z.ZodString) {
 		const obj: SchemaObject = { type: "string" };
-		const checks = def(zodSchema).checks ?? [];
+		// biome-ignore lint/suspicious/noExplicitAny: zod v4 check objects
+		const checks: any[] = def(zodSchema).checks ?? [];
 		for (const check of checks) {
-			if (check.kind === "email") obj.format = "email";
-			if (check.kind === "url") obj.format = "uri";
-			if (check.kind === "uuid") obj.format = "uuid";
-			if (check.kind === "min") obj.minLength = check.value;
-			if (check.kind === "max") obj.maxLength = check.value;
-			if (check.kind === "regex")
-				obj.pattern = check.regex?.source ?? check.actual;
+			// zod v4: format is a direct property on format checks
+			const fmt: string | undefined = check.format;
+			if (fmt === "email") obj.format = "email";
+			if (fmt === "url") obj.format = "uri";
+			if (fmt === "uuid") obj.format = "uuid";
+			// zod v4: minLength/maxLength/regex via check._zod.def
+			const inner: any = check._zod?.def;
+			if (inner?.check === "min_length") obj.minLength = inner.minimum;
+			if (inner?.check === "max_length") obj.maxLength = inner.maximum;
+			if (inner?.check === "string_format" && inner?.format === "regex")
+				obj.pattern = inner.pattern?.source ?? String(inner.pattern);
 		}
 		// Handle default values on string schemas
 		const defaultValue = def(zodSchema).defaultValue;
@@ -133,11 +138,15 @@ export function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): SchemaObject {
 
 	if (zodSchema instanceof z.ZodNumber) {
 		const obj: SchemaObject = { type: "number" };
-		const checks = def(zodSchema).checks ?? [];
+		// biome-ignore lint/suspicious/noExplicitAny: zod v4 check objects
+		const checks: any[] = def(zodSchema).checks ?? [];
 		for (const check of checks) {
-			if (check.kind === "min") obj.minimum = check.value;
-			if (check.kind === "max") obj.maximum = check.value;
-			if (check.kind === "int") obj.type = "integer";
+			// zod v4: isInt flag directly on the check
+			if (check.isInt) obj.type = "integer";
+			// zod v4: min/max via check._zod.def
+			const inner: any = check._zod?.def;
+			if (inner?.check === "greater_than") obj.minimum = inner.value;
+			if (inner?.check === "less_than") obj.maximum = inner.value;
 		}
 		return obj;
 	}
@@ -149,27 +158,32 @@ export function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): SchemaObject {
 	if (zodSchema instanceof z.ZodArray) {
 		return {
 			type: "array",
-			items: zodToOpenAPISchema(def(zodSchema).type as z.ZodTypeAny),
+			items: zodToOpenAPISchema(
+				// biome-ignore lint/suspicious/noExplicitAny: zod def access
+				(def(zodSchema).element ?? def(zodSchema).type) as z.ZodTypeAny,
+			),
 		};
 	}
 
 	if (zodSchema instanceof z.ZodEnum) {
+		// biome-ignore lint/suspicious/noExplicitAny: zod def access
+		const d = def(zodSchema) as any;
+		// zod v4 uses .entries (object), fall back to .values for compat
+		const rawValues: unknown = d.entries ?? d.values;
+		const enumValues: string[] = Array.isArray(rawValues)
+			? rawValues
+			: Object.values(rawValues ?? {});
 		return {
 			type: "string",
-			enum: def(zodSchema).values as string[],
-		};
-	}
-
-	if (zodSchema instanceof z.ZodEnum && 'values' in def(zodSchema) && typeof def(zodSchema).values === 'object' && !Array.isArray(def(zodSchema).values)) {
-		const values = Object.values(def(zodSchema).values);
-		return {
-			type: "string",
-			enum: values.filter((v: unknown) => typeof v === "string") as string[],
+			enum: enumValues.filter(
+				(v: unknown): v is string => typeof v === "string",
+			),
 		};
 	}
 
 	if (zodSchema instanceof z.ZodUnion) {
 		return {
+			// biome-ignore lint/suspicious/noExplicitAny: zod def access
 			oneOf: (def(zodSchema).options as z.ZodTypeAny[]).map(
 				(opt: z.ZodTypeAny) => zodToOpenAPISchema(opt),
 			),
@@ -179,7 +193,9 @@ export function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): SchemaObject {
 	if (zodSchema instanceof z.ZodIntersection) {
 		return {
 			allOf: [
+				// biome-ignore lint/suspicious/noExplicitAny: zod def access
 				zodToOpenAPISchema(def(zodSchema).left as z.ZodTypeAny),
+				// biome-ignore lint/suspicious/noExplicitAny: zod def access
 				zodToOpenAPISchema(def(zodSchema).right as z.ZodTypeAny),
 			],
 		};
@@ -190,20 +206,27 @@ export function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): SchemaObject {
 		zodSchema instanceof z.ZodDefault ||
 		zodSchema instanceof z.ZodNullable
 	) {
-		const inner = def(zodSchema).innerType ?? def(zodSchema).defaultValue;
+		// biome-ignore lint/suspicious/noExplicitAny: zod def access
+		const d = def(zodSchema) as any;
+		const inner = d.innerType ?? d.defaultValue;
 		const result = zodToOpenAPISchema(
 			inner instanceof z.ZodType ? inner : z.any(),
 		);
 		if (zodSchema instanceof z.ZodNullable) result.nullable = true;
 		if (zodSchema instanceof z.ZodDefault) {
-			const dv = def(zodSchema).defaultValue;
+			const dv = d.defaultValue;
 			result.default = typeof dv === "function" ? dv() : dv;
 		}
 		return result;
 	}
 
 	if (zodSchema instanceof z.ZodLiteral) {
-		const literalValue = def(zodSchema).value;
+		// biome-ignore lint/suspicious/noExplicitAny: zod def access
+		const d = def(zodSchema) as any;
+		// zod v4: .values (array), fall back to .value for compat
+		const literalValue: unknown = Array.isArray(d.values)
+			? d.values[0]
+			: d.value;
 		return {
 			type: typeof literalValue === "number" ? "number" : "string",
 			enum: [literalValue],
@@ -214,6 +237,7 @@ export function zodToOpenAPISchema(zodSchema: z.ZodTypeAny): SchemaObject {
 		return {
 			type: "object",
 			additionalProperties: zodToOpenAPISchema(
+				// biome-ignore lint/suspicious/noExplicitAny: zod def access
 				def(zodSchema).valueType as z.ZodTypeAny,
 			),
 		};

@@ -104,7 +104,7 @@ export async function benchAction(source: string, target: string, options: { ite
  * Generates a plausible payload based on the schemas, or a default
  * generic payload if no schemas are defined.
  */
-function createTestPayload(config: PylonConfig): Record<string, unknown> {
+export function createTestPayload(config: PylonConfig): Record<string, unknown> {
   // Try to infer payload shape from schemas
   const schemaKeys = Object.keys(config.schemas);
   if (schemaKeys.length > 0) {

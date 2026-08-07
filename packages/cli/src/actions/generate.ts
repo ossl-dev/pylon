@@ -24,7 +24,7 @@ export async function generateOpenAPIAction(options: { output?: string }): Promi
 /**
  * Build an OpenAPI 3.0 spec skeleton from the config.
  */
-function buildOpenAPISpec(config: PylonConfig): Record<string, unknown> {
+export function buildOpenAPISpec(config: PylonConfig): Record<string, unknown> {
   const versions = extractVersions(config);
 
   return {
@@ -48,7 +48,7 @@ function buildOpenAPISpec(config: PylonConfig): Record<string, unknown> {
 /**
  * Extract version names from the config.
  */
-function extractVersions(config: PylonConfig): string[] {
+export function extractVersions(config: PylonConfig): string[] {
   const versions = config.versions;
 
   if (Array.isArray(versions)) {
@@ -104,7 +104,7 @@ export async function generateChangelogAction(range: string): Promise<void> {
  * Currently produces a template changelog. Full implementation
  * will compare schemas, transforms, and endpoint definitions.
  */
-function buildChangelog(
+export function buildChangelog(
   source: string,
   target: string,
   config: PylonConfig,

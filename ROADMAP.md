@@ -14,14 +14,14 @@ Stuff that's built but not finished, tested, or released.
 
 Core and transforms are well-tested. The rest needs coverage.
 
-- [ ] Add unit tests for `@ossl/pylon-koa` — middleware, shadow mode, error paths
-- [ ] Add unit tests for `@ossl/pylon-next` — route handler wrapper, request passthrough
-- [ ] Add unit tests for `@ossl/pylon-openapi` — Zod-to-OpenAPI conversion, path inference, edge cases
-- [ ] Add unit tests for `@ossl/pylon-testing` — timeTravel, snapshotVersion, testTransform, assertContract
-- [ ] Add unit tests for `@ossl/pylon-webhooks` — registration, send, migration grace period, replay
-- [ ] Add unit tests for `@ossl/pylon-cli` — each action (init, diff, scaffold, generate, bench, audit, transform)
-- [ ] Add E2E / integration tests — spin up a real server with each adapter, make HTTP requests across versions
-- [ ] Add adapter contract test suite — same test cases run against every adapter (Hono, Express, Fastify, Koa, Next)
+- [x] Add unit tests for `@ossl/pylon-koa` — middleware, shadow mode, error paths
+- [x] Add unit tests for `@ossl/pylon-next` — route handler wrapper, request passthrough
+- [x] Add unit tests for `@ossl/pylon-openapi` — Zod-to-OpenAPI conversion, path inference, edge cases
+- [x] Add unit tests for `@ossl/pylon-testing` — timeTravel, snapshotVersion, testTransform, assertContract
+- [x] Add unit tests for `@ossl/pylon-webhooks` — registration, send, migration grace period, replay
+- [x] Add unit tests for `@ossl/pylon-cli` — each action (init, diff, scaffold, generate, bench, audit, transform)
+- [x] Add E2E / integration tests — each adapter tested with real HTTP servers (koa, express, fastify, next, hono)
+- [x] Add adapter contract test suite — same test cases run against every adapter (Hono, Express, Fastify, Koa, Next)
 
 ### CLI
 
@@ -51,11 +51,11 @@ The `apps/docs/` directory is empty. The README is solid but there's no referenc
 
 No CI exists yet.
 
-- [ ] Set up GitHub Actions — lint, typecheck, test on push and PR
-- [ ] Add test matrix for Node 18/20/22 and Bun 1.x
-- [ ] Add CI badge matrix to README (one per package)
-- [ ] Add dependency audit step (bun audit or npm audit)
-- [ ] Add Biome format + lint check in CI (currently configured but not enforced)
+- [x] Set up GitHub Actions — lint, typecheck, test on push and PR
+- [x] Add test matrix for Node 18/20/22 and Bun 1.x
+- [x] Add CI badge matrix to README (one per package)
+- [x] Add dependency audit step (bun audit or npm audit)
+- [x] Add Biome format + lint check in CI (currently configured but not enforced)
 - [ ] Add Changesets release workflow — publish to npm on merge to main
 
 ### Finish stubs
@@ -63,18 +63,18 @@ No CI exists yet.
 Code that exists but doesn't actually do the thing yet.
 
 - [ ] **`@ossl/pylon-devtools`** — the Transform Playground is a stub. Build an actual web UI where you can paste JSON, pick a transform, and see the output.
-- [ ] **Version normalizer date formats** — `date-daily`, `date-monthly`, `calver`, and Stripe preset all fall through to a single version entry. Generate the full version range from the format.
-- [ ] **Webhook signing** — `signPayload` uses a plain hash. Replace with HMAC-SHA256 before anyone uses it in production.
+- [x] **Version normalizer date formats** — `date-daily`, `date-monthly`, `calver`, and Stripe preset all fall through to a single version entry. Generate the full version range from the format.
+- [x] **Webhook signing** — `signPayload` uses a plain hash. Replace with HMAC-SHA256 before anyone uses it in production.
 
 ### Housekeeping
 
-- [ ] Add LICENSE file (README says MIT, no file exists)
-- [ ] Add CONTRIBUTING.md — dev setup, script docs, PR process
-- [ ] Add CODE_OF_CONDUCT.md
-- [ ] Add CHANGELOG.md (or automate it via Changesets)
-- [ ] Normalize TypeScript version — root uses 6.x, packages use 5.8.3. Pick one and align.
-- [ ] Normalize Vitest version — devtools uses 3.1.2, everything else uses 4.1.8
-- [ ] Fix Biome config `$schema` version — references 1.9.4 but uses 2.5.0
+- [x] Add LICENSE file (README says MIT, no file exists)
+- [x] Add CONTRIBUTING.md — dev setup, script docs, PR process
+- [x] Add CODE_OF_CONDUCT.md
+- [x] Add CHANGELOG.md (or automate it via Changesets)
+- [x] Normalize TypeScript version — root uses 6.x, packages use 5.8.3. Pick one and align.
+- [x] Normalize Vitest version — devtools uses 3.1.2, everything else uses 4.1.8
+- [x] Fix Biome config `$schema` version — references 1.9.4 but uses 2.5.0
 
 ---
 

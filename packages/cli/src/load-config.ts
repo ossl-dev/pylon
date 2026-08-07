@@ -217,7 +217,7 @@ export function generateConfigContent(
 /**
  * Serialize the VersionsConfig field.
  */
-function serializeVersions(versions: VersionsConfig): string[] {
+export function serializeVersions(versions: VersionsConfig): string[] {
   const lines: string[] = [];
 
   if (Array.isArray(versions)) {

@@ -4,7 +4,7 @@ import type { PylonConfig } from '@ossl/pylon-core';
 /**
  * Describes a single field in a schema.
  */
-interface SchemaField {
+export interface SchemaField {
   name: string;
   type: string;
   required: boolean;
@@ -14,7 +14,7 @@ interface SchemaField {
 /**
  * Describes the shape of a schema for diffing purposes.
  */
-interface SchemaShape {
+export interface SchemaShape {
   fields: SchemaField[];
   nestedSchemas: Record<string, SchemaShape>;
 }
@@ -22,7 +22,7 @@ interface SchemaShape {
 /**
  * A change detected between two schema versions.
  */
-interface SchemaChange {
+export interface SchemaChange {
   type: 'added' | 'removed' | 'changed' | 'renamed';
   field: string;
   details: string;
@@ -31,7 +31,7 @@ interface SchemaChange {
 /**
  * Represents a section of the changelog output.
  */
-interface ChangelogSection {
+export interface ChangelogSection {
   title: string;
   changes: SchemaChange[];
 }
@@ -76,7 +76,7 @@ export async function diffAction(a: string, b: string): Promise<void> {
  *
  * This is a best-effort heuristic since Zod schemas may be complex.
  */
-function extractSchemaShape(config: PylonConfig, version: string): SchemaShape | null {
+export function extractSchemaShape(config: PylonConfig, version: string): SchemaShape | null {
   // Look for a schema keyed by the version name, or a naming convention
   const schemaKeys = Object.keys(config.schemas);
   const key = schemaKeys.find(
@@ -105,7 +105,7 @@ function extractSchemaShape(config: PylonConfig, version: string): SchemaShape |
  * - Fields with type changes (changed)
  * - Fields renamed (via simple heuristic: removed + added with similar name)
  */
-function compareShapes(aShape: SchemaShape, bShape: SchemaShape): ChangelogSection[] {
+export function compareShapes(aShape: SchemaShape, bShape: SchemaShape): ChangelogSection[] {
   const sections: ChangelogSection[] = [];
 
   const aFields = aShape.fields;
@@ -176,7 +176,7 @@ function compareShapes(aShape: SchemaShape, bShape: SchemaShape): ChangelogSecti
  * Matches removed fields to added fields with similar names
  * (e.g., "userName" -> "username", "created_at" -> "createdAt").
  */
-function detectRenames(
+export function detectRenames(
   removed: SchemaChange[],
   added: SchemaChange[],
 ): SchemaChange[] {
@@ -202,7 +202,7 @@ function detectRenames(
 /**
  * Simple name similarity using character overlap (Jaccard-like).
  */
-function nameSimilarity(a: string, b: string): number {
+export function nameSimilarity(a: string, b: string): number {
   const normalize = (s: string) =>
     s
       .toLowerCase()

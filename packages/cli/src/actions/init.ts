@@ -94,7 +94,7 @@ async function fromExistingAction(path: string): Promise<PylonConfig> {
 /**
  * Scan a directory recursively for versioning patterns in source files.
  */
-function scanForVersions(dir: string): string[] {
+export function scanForVersions(dir: string): string[] {
   const versions: string[] = [];
   const skipDirs = new Set(['node_modules', 'dist', '.git', '.next', 'build']);
 
@@ -147,7 +147,7 @@ function scanForVersions(dir: string): string[] {
 /**
  * Generate a configuration based on a preset name.
  */
-function generatePresetConfig(preset: string): PylonConfig {
+export function generatePresetConfig(preset: string): PylonConfig {
   switch (preset) {
     case 'semantic': {
       return {
@@ -186,7 +186,7 @@ function generatePresetConfig(preset: string): PylonConfig {
 /**
  * Generate a default Pylon config.
  */
-function generateDefaultConfig(): PylonConfig {
+export function generateDefaultConfig(): PylonConfig {
   return {
     current: 'v1',
     versions: { format: 'semantic', prefix: 'v' },
