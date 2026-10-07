@@ -1,11 +1,15 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { extname, join, resolve } from 'node:path';
-import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
-import { writeConfig } from '../load-config.js';
+import type { PylonConfig } from '@ossl/pylon-core';
+import { VersionNormalizer } from '@ossl/pylon-core';
 
-/**
- * Regex patterns used to detect versioning-related code in source files.
- */
 const VERSION_PATTERNS = [
   /version\s*['"](\d+\.\d+\.\d+)['"]/g,
   /api['"]?\s*:\s*['"]v?(\d+)['"]/gi,
@@ -15,88 +19,136 @@ const VERSION_PATTERNS = [
   /x-api-version/gi,
 ];
 
-/**
- * Create pylon.config.ts interactively or from presets.
- *
- * If --from-existing is provided, the source path is scanned for versioning
- * patterns in source files. If --preset is provided, a preset configuration
- * is generated. Otherwise the user is prompted for configuration choices.
- */
-export async function initAction(options: {
-  preset?: string;
-  fromExisting?: string;
-}): Promise<void> {
-  const cwd = process.cwd();
-  const configPath = join(cwd, 'pylon.config.ts');
-
-  if (existsSync(configPath)) {
-    console.error('pylon.config.ts already exists in the current directory.');
-    console.error('Delete it first, or use a different directory.');
-    process.exit(1);
-  }
-
-  let config: PylonConfig | null = null;
-
+export async function initAction(
+  options: { preset?: string; fromExisting?: string; example?: boolean } = {},
+): Promise<void> {
+  const configPath = join(process.cwd(), 'pylon.config.ts');
+  const examplePath = join(process.cwd(), 'pylon.example.ts');
+  if (existsSync(configPath)) throw new Error('pylon.config.ts already exists; no files changed.');
+  if (options.example !== false && existsSync(examplePath))
+    throw new Error('pylon.example.ts already exists; use --no-example to create config only.');
+  let config = generatePresetConfig(options.preset ?? 'semantic');
   if (options.fromExisting) {
-    config = await fromExistingAction(options.fromExisting);
-  } else if (options.preset) {
-    config = generatePresetConfig(options.preset);
-  } else {
-    config = await interactiveInit();
+    const source = resolve(options.fromExisting);
+    if (!statSync(source, { throwIfNoEntry: false })?.isDirectory())
+      throw new Error(`Source directory not found: ${source}`);
+    const versions = [...new Set(scanForVersions(source))].sort(
+      new Intl.Collator('en', { numeric: true }).compare,
+    );
+    if (versions.length)
+      config = { current: versions[versions.length - 1]!, versions, schemas: {}, transforms: {} };
+    console.error(
+      'Scanned release labels only. Generated /users endpoint is an example; define your real contracts explicitly.',
+    );
   }
-
-  if (!config) {
-    console.error('Failed to generate configuration.');
-    process.exit(1);
+  const starter = renderStarter(config);
+  writeFileSync(configPath, starter.config, { flag: 'wx' });
+  try {
+    if (options.example !== false) writeFileSync(examplePath, starter.example, { flag: 'wx' });
+  } catch (error) {
+    unlinkSync(configPath);
+    throw error;
   }
-
-  await writeConfig(configPath, config);
   console.log(`Created ${configPath}`);
-  console.log('');
-  console.log('Next steps:');
-  console.log('  1. Review the generated config in pylon.config.ts');
-  console.log('  2. Define your schemas using zod');
-  console.log('  3. Add transform functions between versions');
-  console.log('  4. Run "pylon schema validate <version>" to validate schemas');
+  console.log('Install: bun add @ossl/pylon-core @ossl/pylon-hono hono zod');
+  console.log('Check: pylon doctor');
+  if (options.example !== false) console.log('Run: bun pylon.example.ts');
 }
 
-/**
- * Analyze an existing codebase for versioning patterns and generate a config.
- */
-async function fromExistingAction(path: string): Promise<PylonConfig> {
-  const resolvedPath = resolve(path);
-  console.error(`Scanning ${resolvedPath} for versioning patterns...`);
+export function generateDefaultConfig(): PylonConfig {
+  return generatePresetConfig('semantic');
+}
 
-  const detectedVersions = scanForVersions(resolvedPath);
-  const uniqueVersions = [...new Set(detectedVersions)];
+export function generatePresetConfig(preset: string): PylonConfig {
+  let versions: string[];
+  if (preset === 'semantic') versions = ['v1', 'v2'];
+  else if (preset === 'numeric') versions = ['1', '2'];
+  else if (preset === 'stripe')
+    versions = [
+      new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+      new Date().toISOString().slice(0, 10),
+    ];
+  else throw new Error(`Unknown preset: "${preset}". Choose semantic, numeric, or stripe.`);
+  return { current: versions[1]!, versions, schemas: {}, transforms: {} };
+}
 
-  if (uniqueVersions.length === 0) {
-    console.error('No versioning patterns detected. Generating default config.');
-    return generateDefaultConfig();
-  }
-
-  uniqueVersions.sort();
-
-  const versions: VersionDefinition[] = uniqueVersions.map((v, i) => ({
-    name: v,
-    order: i + 1,
-  }));
-
-  const current = versions[versions.length - 1]!.name;
-
-  console.error(`Detected versions: ${uniqueVersions.join(', ')}`);
-
+/** Executable migration example, with independent request and response schemas. */
+export function renderStarter(config: PylonConfig): { config: string; example: string } {
+  const versions = new VersionNormalizer(config.versions, config.current)
+    .listVersions()
+    .map((v) => v.name);
+  const contracts = versions
+    .map((version, index) => {
+      const legacy = index === 0 && versions.length > 1;
+      const field = legacy ? 'name' : 'fullName';
+      return `    ${JSON.stringify(version)}: {
+      request: z.object({ ${field}: z.string().min(1) }),
+      response: z.object({ id: z.number(), ${field}: z.string()${legacy ? '' : ', createdAt: z.string().datetime()'} }),
+    },`;
+    })
+    .join('\n');
+  const transforms = versions
+    .slice(0, -1)
+    .map(
+      (version, index) => `    ${JSON.stringify(`${version}->${versions[index + 1]}`)}: {
+      request: ${index === 0 ? '(input) => ({ fullName: input.name })' : "'identity'"},
+      response: ${index === 0 ? '(output) => ({ id: output.id, name: output.fullName })' : "'identity'"},
+    },`,
+    )
+    .join('\n');
   return {
-    current,
-    versions,
-    schemas: {},
-    transforms: {},
+    config: `import { defineConfig, defineEndpoint } from '@ossl/pylon-core';
+import { z } from 'zod';
+
+export const createUser = defineEndpoint({
+  method: 'POST',
+  path: '/users',
+  contracts: {
+${contracts}
+  },
+  transforms: {
+${transforms}
+  },
+});
+
+export default defineConfig({
+  current: ${JSON.stringify(config.current)},
+  versions: ${JSON.stringify(versions)},
+  endpoints: { createUser },
+});
+`,
+    example: `import { Pylon, type EndpointInput } from '@ossl/pylon-core';
+import { pylonHono } from '@ossl/pylon-hono';
+import { Hono } from 'hono';
+import config, { createUser } from './pylon.config.ts';
+
+type UserInput = EndpointInput<typeof createUser, typeof config.current>;
+const app = new Hono();
+const pylon = new Pylon(config);
+app.use('*', pylonHono(pylon));
+app.post('/users', async (c) => {
+  const input = await c.req.json<UserInput>();
+  return c.json({ id: 1, fullName: input.fullName, createdAt: new Date().toISOString() });
+});
+
+const versions = pylon.normalizer.listVersions();
+for (const [index, definition] of versions.entries()) {
+  const version = definition.name;
+  if (pylon.isUnpublished(version)) continue;
+  const response = await app.request('/users', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'api-version': version },
+    body: JSON.stringify(index === 0 && versions.length > 1 ? { name: 'Ada' } : { fullName: 'Ada' }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  console.log(version, await response.json());
+}
+
+export { app };
+`,
   };
 }
 
-/**
- * Scan a directory recursively for versioning patterns in source files.
- */
 export function scanForVersions(dir: string): string[] {
   const versions: string[] = [];
   const skipDirs = new Set(['node_modules', 'dist', '.git', '.next', 'build']);
@@ -144,114 +196,4 @@ export function scanForVersions(dir: string): string[] {
 
   walk(dir);
   return versions;
-}
-
-/**
- * Generate a configuration based on a preset name.
- */
-export function generatePresetConfig(preset: string): PylonConfig {
-  switch (preset) {
-    case 'semantic': {
-      return {
-        current: 'v3',
-        versions: { format: 'semantic', prefix: 'v' },
-        schemas: {},
-        transforms: {},
-      };
-    }
-
-    case 'numeric': {
-      return {
-        current: '3',
-        versions: { format: 'numeric' },
-        schemas: {},
-        transforms: {},
-      };
-    }
-
-    case 'stripe': {
-      return {
-        current: new Date().toISOString().split('T')[0]!,
-        versions: { preset: 'stripe' },
-        schemas: {},
-        transforms: {},
-      };
-    }
-
-    default: {
-      console.error(`Unknown preset "${preset}". Using default.`);
-      return generateDefaultConfig();
-    }
-  }
-}
-
-/**
- * Generate a default Pylon config.
- */
-export function generateDefaultConfig(): PylonConfig {
-  return {
-    current: 'v1',
-    versions: { format: 'semantic', prefix: 'v' },
-    schemas: {},
-    transforms: {},
-  };
-}
-
-/**
- * Interactive initialization — prompts user for config choices.
- *
- * Uses simple readline prompts since we want zero extra dependencies.
- */
-async function interactiveInit(): Promise<PylonConfig> {
-  const readline = (await import('node:readline')).default;
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  const ask = (query: string): Promise<string> => {
-    return new Promise((resolve) => {
-      rl.question(query, (answer) => {
-        resolve(answer.trim());
-      });
-    });
-  };
-
-  console.error('');
-  console.error('Pylon Configuration Wizard');
-  console.error('==========================');
-  console.error('');
-
-  const current = await ask('Current API version (e.g. v2, 3, 2024-01-15) [v1]: ');
-  const currentVersion = current || 'v1';
-
-  const formatTypes = ['semantic', 'numeric', 'date-monthly', 'date-daily'];
-  const formatStr = await ask(`Version format (${formatTypes.join(', ')}) [semantic]: `);
-  const format = (formatStr || 'semantic') as
-    | 'semantic'
-    | 'numeric'
-    | 'date-monthly'
-    | 'date-daily';
-
-  const prefixStr = await ask('Version prefix (e.g. "v") [v]: ');
-  const prefix = format === 'semantic' ? prefixStr || 'v' : undefined;
-
-  // Parse number of schemas (currently unused, reserved for future)
-  await ask('Number of schemas (endpoints) to define [0]: ');
-
-  rl.close();
-
-  const config: PylonConfig = {
-    current: currentVersion,
-    versions: {
-      format,
-      ...(prefix ? { prefix } : {}),
-    },
-    schemas: {},
-    transforms: {},
-  };
-
-  console.error(`\nGenerating config with current=${currentVersion}, format=${format}...\n`);
-
-  return config;
 }

@@ -46,6 +46,8 @@ export async function versionListAction(): Promise<void> {
     const markers: string[] = [];
     if (isCurrent) markers.push('current');
     if (v.deprecated) markers.push('deprecated');
+    if (v.retired) markers.push('retired');
+    else if (v.unpublished) markers.push('unpublished');
     if (v.sunsetDate && v.sunsetDate <= today) markers.push('sunset');
 
     const tag = markers.length > 0 ? ` (${markers.join(', ')})` : '';
@@ -66,8 +68,7 @@ export async function versionCurrentAction(): Promise<void> {
 /**
  * Add a new version.
  *
- * Scaffolds an empty schema for the new version and creates empty transforms
- * from the previous version.
+ * Contract projects must define the new schemas and migrations before changing current.
  */
 export async function versionAddAction(name: string): Promise<void> {
   const { config, configPath } = await loadPylonConfig();
@@ -164,41 +165,16 @@ export async function versionSunsetAction(name: string, options: { date?: string
 /**
  * Unpublish (emergency rollback) a version.
  *
- * Sets a rollback flag and ensures the fallback version is set as current.
- * The unpublish is tracked with a reason and timestamp.
+ * Reject requests after reload without changing the current implementation.
  */
 export async function versionUnpublishAction(name: string): Promise<void> {
   const { config, configPath } = await loadPylonConfig();
   const versions = ensureVersionsArray(config);
-
-  const index = versions.findIndex((v) => v.name === name);
-  if (index === -1) {
-    console.error(`Version "${name}" not found.`);
-    process.exit(1);
-  }
-
-  const version = versions[index]!;
-
-  if (version.name === config.current) {
-    // Find the previous version to fall back to
-    const sorted = sortVersions(versions);
-    const currentIndex = sorted.findIndex((v) => v.name === name);
-
-    if (currentIndex > 0) {
-      const fallback = sorted[currentIndex - 1]!;
-      const updatedConfig: PylonConfig = {
-        ...config,
-        current: fallback.name,
-        versions,
-      };
-      await writeConfig(configPath, updatedConfig);
-      console.log(`Unpublished version "${name}". Current version is now "${fallback.name}".`);
-      return;
-    }
-  }
-
-  await writeConfig(configPath, config);
-  console.log(`Unpublished version "${name}".`);
+  const version = versions.find((v) => v.name === name);
+  if (!version) throw new Error(`Version "${name}" not found.`);
+  version.unpublished = true;
+  await writeConfig(configPath, { ...config, versions });
+  console.log(`Unpublished version "${name}". Requests return 410 after config reload.`);
 }
 
 /**
@@ -207,55 +183,25 @@ export async function versionUnpublishAction(name: string): Promise<void> {
 export async function versionPublishAction(name: string): Promise<void> {
   const { config, configPath } = await loadPylonConfig();
   const versions = ensureVersionsArray(config);
-
   const version = versions.find((v) => v.name === name);
-  if (!version) {
-    console.error(`Version "${name}" not found.`);
-    process.exit(1);
-  }
-
-  const updatedConfig: PylonConfig = {
-    ...config,
-    current: name,
-    versions,
-  };
-
-  await writeConfig(configPath, updatedConfig);
-  console.log(`Published version "${name}" as current.`);
+  if (!version) throw new Error(`Version "${name}" not found.`);
+  if (version.retired) throw new Error(`Cannot publish permanently retired version: "${name}"`);
+  version.unpublished = false;
+  await writeConfig(configPath, { ...config, versions });
+  console.log(`Published version "${name}". Current implementation remains "${config.current}".`);
 }
 
 /**
- * Permanently remove a version from the config.
+ * Permanently reject a version while retaining migration history.
  */
 export async function versionRetireAction(name: string): Promise<void> {
   const { config, configPath } = await loadPylonConfig();
   const versions = ensureVersionsArray(config);
-
-  const index = versions.findIndex((v) => v.name === name);
-  if (index === -1) {
-    console.error(`Version "${name}" not found.`);
-    process.exit(1);
-  }
-
-  const filtered = versions.filter((v) => v.name !== name);
-
-  const updatedConfig: PylonConfig = {
-    ...config,
-    versions: filtered,
-    // If the removed version was current, update to the latest remaining
-    current:
-      config.current === name
-        ? filtered.length > 0
-          ? filtered[filtered.length - 1]!.name
-          : 'v1'
-        : config.current,
-  };
-
-  await writeConfig(configPath, updatedConfig);
-
-  if (config.current === name) {
-    console.log(`Retired version "${name}". Current version is now "${updatedConfig.current}".`);
-  } else {
-    console.log(`Retired version "${name}".`);
-  }
+  const version = versions.find((v) => v.name === name);
+  if (!version) throw new Error(`Version "${name}" not found.`);
+  version.retired = true;
+  version.unpublished = true;
+  version.deprecated = true;
+  await writeConfig(configPath, { ...config, versions });
+  console.log(`Retired version "${name}". Migration history retained.`);
 }

@@ -1,7 +1,7 @@
 import type { PylonConfig } from '@ossl/pylon-core';
 import { Pylon, VersionNormalizer } from '@ossl/pylon-core';
 import type { OpenAPISpec } from '@ossl/pylon-openapi';
-import { generateOpenAPI } from '@ossl/pylon-openapi';
+import { generateOpenAPI, generateOpenAPIVersions } from '@ossl/pylon-openapi';
 import { loadPylonConfig } from '../load-config.js';
 
 /**
@@ -9,10 +9,35 @@ import { loadPylonConfig } from '../load-config.js';
  *
  * Outputs a JSON OpenAPI spec to stdout or a file.
  */
-export async function generateOpenAPIAction(options: { output?: string }): Promise<void> {
+export async function generateOpenAPIAction(options: {
+  output?: string;
+  version?: string;
+  allVersions?: boolean;
+}): Promise<void> {
   const { config } = await loadPylonConfig();
+  if (options.allVersions && options.version) throw new Error('Choose --version or --all-versions');
+  if (options.allVersions) {
+    const specs = generateOpenAPIVersions(new Pylon(config));
+    if (!options.output) {
+      console.log(JSON.stringify(specs, null, 2));
+      return;
+    }
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    mkdirSync(options.output, { recursive: true });
+    for (const [version, spec] of Object.entries(specs))
+      writeFileSync(
+        join(options.output, `${encodeURIComponent(version)}.json`),
+        `${JSON.stringify(spec, null, 2)}\n`,
+      );
+    console.log(`OpenAPI specs written to ${options.output}`);
+    return;
+  }
 
-  const spec = buildOpenAPISpec(config);
+  const spec = generateOpenAPI(
+    new Pylon(config),
+    options.version ? { versions: [options.version] } : {},
+  );
 
   if (options.output) {
     const { dirname } = await import('node:path');

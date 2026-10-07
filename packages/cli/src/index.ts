@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { auditAction } from './actions/audit.js';
+import type { BenchOptions } from './actions/bench.js';
 import { benchAction } from './actions/bench.js';
 import { diffAction } from './actions/diff.js';
+import { doctorAction } from './actions/doctor.js';
 import { generateChangelogAction, generateOpenAPIAction } from './actions/generate.js';
 import { initAction } from './actions/init.js';
 import { playgroundAction } from './actions/playground.js';
 import { scaffoldAction } from './actions/scaffold.js';
-import { schemaDiffAction, schemaShowAction, schemaValidateAction } from './actions/schema.js';
+import { schemaShowAction, schemaValidateAction } from './actions/schema.js';
 import {
   transformComposeAction,
   transformGraphAction,
@@ -29,10 +31,17 @@ const program = new Command();
 program.name('pylon').description('API versioning toolkit').version('0.0.1');
 
 program
+  .command('doctor')
+  .description('Validate contracts, configuration, and migration paths')
+  .option('--json', 'Print machine-readable results')
+  .action(doctorAction);
+
+program
   .command('init')
-  .description('Create pylon.config.ts interactively')
+  .description('Create contracts and a runnable two-version example')
   .option('--preset <name>', 'Use versioning preset')
   .option('--from-existing <path>', 'Analyze existing codebase')
+  .option('--no-example', 'Create config only')
   .action(async (options) => {
     await initAction(options);
   });
@@ -83,30 +92,28 @@ versionCmd
   });
 versionCmd
   .command('retire <name>')
-  .description('Permanently remove')
+  .description('Permanently reject requests; retain migration history')
   .action(async (name: string) => {
     await versionRetireAction(name);
   });
 
-const schemaCmd = program.command('schema').description('Manage schemas');
-schemaCmd
-  .command('show <version>')
-  .description('Print schema')
-  .action(async (version: string) => {
-    await schemaShowAction(version);
-  });
-schemaCmd
-  .command('diff <a> <b>')
-  .description('Show schema diff')
-  .action(async (a: string, b: string) => {
-    await schemaDiffAction(a, b);
-  });
-schemaCmd
-  .command('validate <version>')
-  .description('Validate schema')
-  .action(async (version: string) => {
-    await schemaValidateAction(version);
-  });
+const schemaCmd = program.command('schema').description('Inspect versioned contracts');
+function schemaOptions(command: Command): Command {
+  return command
+    .option('--endpoint <name>', 'Select endpoint contract')
+    .option('--direction <direction>', 'request or response', 'request');
+}
+schemaOptions(schemaCmd.command('show <version>').description('Print JSON schema')).action(
+  schemaShowAction,
+);
+schemaOptions(schemaCmd.command('diff <a> <b>').description('Compare JSON schema assertions'))
+  .option('--json', 'Print machine-readable changes')
+  .action(diffAction);
+schemaOptions(
+  schemaCmd.command('validate <version>').description('Validate schema or JSON fixture'),
+)
+  .option('--input <file>', 'JSON fixture to parse against the schema')
+  .action(schemaValidateAction);
 
 const transformCmd = program.command('transform').description('Manage transforms');
 transformCmd
@@ -135,21 +142,18 @@ program
   .action(async (path: string) => {
     await auditAction(path);
   });
-program
-  .command('diff')
-  .description('Generate changelog between versions')
-  .argument('<a>', 'Source version')
-  .argument('<b>', 'Target version')
-  .action(async (a: string, b: string) => {
-    await diffAction(a, b);
-  });
+schemaOptions(program.command('diff <a> <b>').description('Compare versioned contract schemas'))
+  .option('--json', 'Print machine-readable changes')
+  .action(diffAction);
 
 const generateCmd = program.command('generate').description('Generate artifacts');
 generateCmd
   .command('openapi')
   .description('Generate OpenAPI spec')
   .option('-o, --output <path>', 'Output path')
-  .action(async (options: { output?: string }) => {
+  .option('--version <name>', 'Export one published version')
+  .option('--all-versions', 'Export separate specs; output is a directory')
+  .action(async (options: { output?: string; version?: string; allVersions?: boolean }) => {
     await generateOpenAPIAction(options);
   });
 generateCmd
@@ -176,12 +180,17 @@ program
   });
 program
   .command('bench')
-  .description('Benchmark transform performance')
+  .description('Benchmark real JSON fixtures and contract processing')
   .argument('<source>', 'Source version')
   .argument('<target>', 'Target version')
   .option('-n, --iterations <number>', 'Iterations', '1000')
-  .action(async (source: string, target: string, options: { iterations: string }) => {
-    await benchAction(source, target, { iterations: parseInt(options.iterations, 10) || 1000 });
+  .requiredOption('--input <path>', 'Request fixture in source wire format')
+  .option('--response <path>', 'Current response fixture for pipeline mode')
+  .option('--endpoint <name>', 'Endpoint contract to benchmark')
+  .option('--mode <name>', 'transform or pipeline', 'transform')
+  .option('--json', 'Print machine-readable results')
+  .action(async (source: string, target: string, options: BenchOptions) => {
+    await benchAction(source, target, options);
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {

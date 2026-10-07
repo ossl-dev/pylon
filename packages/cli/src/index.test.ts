@@ -6,11 +6,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { AuditResult } from './actions/audit.js';
 import { generateSuggestions, scanCodebase } from './actions/audit.js';
-import { createTestPayload } from './actions/bench.js';
+import { runBenchmark } from './actions/bench.js';
 import type { ChangelogSection, SchemaChange, SchemaField, SchemaShape } from './actions/diff.js';
 import {
   compareShapes,
   detectRenames,
+  diffSchemas,
   extractSchemaShape,
   nameSimilarity,
 } from './actions/diff.js';
@@ -366,9 +367,9 @@ describe('compareShapes', () => {
     expect(sections.map((s) => s.title)).toEqual([
       'Added Fields',
       'Removed Fields',
-      'Renamed Fields',
+      'Possible Renames',
     ]);
-    const renamed = sections.find((s) => s.title === 'Renamed Fields');
+    const renamed = sections.find((s) => s.title === 'Possible Renames');
     expect(renamed!.changes[0]!.field).toBe('userName -> username');
   });
 
@@ -385,8 +386,34 @@ describe('compareShapes', () => {
       'Added Fields',
       'Removed Fields',
       'Changed Types',
-      'Renamed Fields',
+      'Possible Renames',
     ]);
+  });
+});
+
+describe('JSON schema diffs', () => {
+  it('reports nested constraints and requiredness without treating similar names as proven renames', () => {
+    const a = {
+      properties: { profile: { properties: { name: { type: 'string', minLength: 1 } } } },
+      required: ['profile'],
+    };
+    const b = {
+      properties: { profile: { properties: { name: { type: 'string', minLength: 2 } } } },
+      required: [],
+    };
+    expect(diffSchemas(a, b)).toEqual([
+      {
+        type: 'changed',
+        field: '/properties/profile/properties/name/minLength',
+        details: '1 -> 2',
+      },
+      { type: 'changed', field: '/required', details: '["profile"] -> []' },
+    ]);
+    expect(
+      diffSchemas({ properties: { name: {} } }, { properties: { fullName: {} } }).map(
+        (c) => c.type,
+      ),
+    ).toEqual(['removed', 'added']);
   });
 });
 
@@ -396,23 +423,23 @@ describe('extractSchemaShape', () => {
       schemas: { v1: z.object({ name: z.string() }) },
     });
     expect(extractSchemaShape(config, 'v1')).toEqual({
-      fields: [],
+      fields: [{ name: 'name', type: 'string', required: true }],
       nestedSchemas: {},
     });
   });
 
-  it('matches by prefix in both directions', () => {
+  it('does not match a version by prefix', () => {
     const config = baseConfig({
       schemas: { v1: z.object({ name: z.string() }) },
     });
-    expect(extractSchemaShape(config, 'v1.5')).not.toBeNull();
+    expect(extractSchemaShape(config, 'v1.5')).toBeNull();
   });
 
-  it('matches a key that starts with the requested version', () => {
+  it('does not truncate version labels', () => {
     const config = baseConfig({
       schemas: { 'v1.5': z.object({ name: z.string() }) },
     });
-    expect(extractSchemaShape(config, 'v1')).not.toBeNull();
+    expect(extractSchemaShape(config, 'v1')).toBeNull();
   });
 
   it('returns null when no key matches', () => {
@@ -573,10 +600,10 @@ describe('generateSuggestions', () => {
 // ---------------------------------------------------------------------------
 
 describe('generateDefaultConfig', () => {
-  it('returns a v1 semantic config', () => {
+  it('returns an explicit two-release config', () => {
     expect(generateDefaultConfig()).toEqual({
-      current: 'v1',
-      versions: { format: 'semantic', prefix: 'v' },
+      current: 'v2',
+      versions: ['v1', 'v2'],
       schemas: {},
       transforms: {},
     });
@@ -586,8 +613,8 @@ describe('generateDefaultConfig', () => {
 describe('generatePresetConfig', () => {
   it('generates a semantic preset', () => {
     expect(generatePresetConfig('semantic')).toEqual({
-      current: 'v3',
-      versions: { format: 'semantic', prefix: 'v' },
+      current: 'v2',
+      versions: ['v1', 'v2'],
       schemas: {},
       transforms: {},
     });
@@ -595,8 +622,8 @@ describe('generatePresetConfig', () => {
 
   it('generates a numeric preset', () => {
     expect(generatePresetConfig('numeric')).toEqual({
-      current: '3',
-      versions: { format: 'numeric' },
+      current: '2',
+      versions: ['1', '2'],
       schemas: {},
       transforms: {},
     });
@@ -604,12 +631,12 @@ describe('generatePresetConfig', () => {
 
   it('generates a stripe preset with today as the current version', () => {
     const config = generatePresetConfig('stripe');
-    expect(config.versions).toEqual({ preset: 'stripe' });
+    expect(config.versions).toHaveLength(2);
     expect(config.current).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('falls back to the default config for unknown presets', () => {
-    expect(generatePresetConfig('unknown-preset')).toEqual(generateDefaultConfig());
+  it('rejects unknown presets', () => {
+    expect(() => generatePresetConfig('unknown-preset')).toThrow('Unknown preset');
   });
 });
 
@@ -736,7 +763,7 @@ describe('extractVersions', () => {
 });
 
 describe('buildOpenAPISpec', () => {
-  it('generates schema components and paths for every configured version', () => {
+  it('exports legacy schema components without fabricated paths', () => {
     const config = baseConfig({
       versions: { format: 'semantic' },
       schemas: { v1: z.object({ name: z.string() }), v2: z.object({ fullName: z.string() }) },
@@ -746,9 +773,7 @@ describe('buildOpenAPISpec', () => {
     expect(spec.info.version).toBe('v2');
     expect(spec.components?.schemas?.v1_request.properties.name).toEqual({ type: 'string' });
     expect(spec.components?.schemas?.v2_request.properties.fullName).toEqual({ type: 'string' });
-    expect(
-      spec.paths['/v1/users']?.post?.requestBody?.content['application/json']?.schema.$ref,
-    ).toBe('#/components/schemas/v1_request');
+    expect(spec.paths).toEqual({});
   });
 });
 
@@ -838,32 +863,28 @@ describe('detectVersions', () => {
 // actions/bench.ts
 // ---------------------------------------------------------------------------
 
-describe('createTestPayload', () => {
-  it('returns a default payload when no schemas are defined', () => {
-    const payload = createTestPayload(baseConfig());
-    expect(payload).toMatchObject({
-      id: 'test-123',
-      name: 'test',
-      email: 'test@example.com',
-      age: 30,
-      active: true,
-      tags: ['a', 'b', 'c'],
-    });
-    expect((payload.metadata as { source: string }).source).toBe('benchmark');
-    expect((payload.metadata as { timestamp: string }).timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+describe('runBenchmark', () => {
+  it('warms the operation and reports finite statistics', async () => {
+    let calls = 0;
+    const result = await runBenchmark(async () => {
+      calls++;
+    }, 10);
+    expect(calls).toBe(21);
+    expect(result.iterations).toBe(10);
+    expect(Number.isFinite(result.opsPerSecond)).toBe(true);
+    expect(result.p99Ms).toBeGreaterThanOrEqual(result.medianMs);
   });
-
-  it('builds a payload keyed by schema names when schemas exist', () => {
-    const config = baseConfig({
-      schemas: {
-        v1: z.object({ name: z.string() }),
-        v2: z.object({ name: z.string(), email: z.string() }),
-      },
-    });
-    expect(createTestPayload(config)).toEqual({
-      v1: 'test_value',
-      v2: 'test_value',
-    });
+  it.each([
+    0,
+    -1,
+    1.5,
+    NaN,
+    Infinity,
+    1000001,
+  ])('rejects invalid iteration count %s', async (iterations) => {
+    await expect(runBenchmark(() => {}, iterations)).rejects.toThrow(
+      'Iterations must be an integer',
+    );
   });
 });
 

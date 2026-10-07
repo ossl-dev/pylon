@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { PylonConfig, VersionDefinition, VersionsConfig } from '@ossl/pylon-core';
-import { validateConfig } from '@ossl/pylon-core';
+import { defineConfig, validateConfig } from '@ossl/pylon-core';
 import { createJiti } from 'jiti';
 import { updateConfigSource } from './config-source.js';
 
@@ -57,7 +57,7 @@ export async function loadPylonConfig(startPath?: string): Promise<LoadedConfig>
     );
   }
 
-  const config = await importConfig(configPath);
+  const config = defineConfig(await importConfig(configPath));
   const validation = validateConfig(config);
   if (!validation.valid) {
     throw new Error(`Invalid pylon configuration:\n${validation.errors.join('\n')}`);
@@ -113,6 +113,8 @@ function formatVersionDef(v: VersionDefinition, indent: string): string {
   if (v.deprecated) {
     parts.push('deprecated: true');
   }
+  if (v.unpublished) parts.push('unpublished: true');
+  if (v.retired) parts.push('retired: true');
   if (v.sunsetDate) parts.push(`sunsetDate: ${JSON.stringify(v.sunsetDate)}`);
   if (v.aliases) parts.push(`aliases: ${JSON.stringify(v.aliases)}`);
   if (v.migrationGuide) parts.push(`migrationGuide: ${JSON.stringify(v.migrationGuide)}`);
@@ -283,6 +285,9 @@ export function serializeVersions(versions: VersionsConfig): string[] {
  */
 export async function writeConfig(path: string, config: PylonConfig): Promise<void> {
   if (existsSync(path)) {
+    const validation = validateConfig(config);
+    if (!validation.valid)
+      throw new Error(`Cannot save invalid configuration:\n${validation.errors.join('\n')}`);
     const source = readFileSync(path, 'utf-8');
     if (path.endsWith('.json')) {
       const original = JSON.parse(source);

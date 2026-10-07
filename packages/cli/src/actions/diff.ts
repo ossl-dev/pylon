@@ -1,5 +1,8 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { PylonConfig } from '@ossl/pylon-core';
+import { zodToOpenAPISchema } from '@ossl/pylon-openapi';
 import { loadPylonConfig } from '../load-config.js';
+import { type SchemaOptions, selectSchema } from './schema.js';
 
 /**
  * Describes a single field in a schema.
@@ -42,56 +45,69 @@ export interface ChangelogSection {
  * Compares the schemas for two versions and prints a markdown-formatted
  * changelog showing added, removed, changed, and potentially renamed fields.
  */
-export async function diffAction(a: string, b: string): Promise<void> {
+export async function diffAction(
+  a: string,
+  b: string,
+  options: SchemaOptions & { json?: boolean } = {},
+): Promise<void> {
   const { config } = await loadPylonConfig();
-
-  const shapeA = extractSchemaShape(config, a);
-  const shapeB = extractSchemaShape(config, b);
-
-  if (!shapeA && !shapeB) {
-    console.log(`No schemas found for "${a}" or "${b}".`);
-    return;
-  }
-
-  if (!shapeA) {
-    console.log(`No schema found for version "${a}".`);
-    return;
-  }
-
-  if (!shapeB) {
-    console.log(`No schema found for version "${b}".`);
-    return;
-  }
-
-  const changes = compareShapes(shapeA, shapeB);
-
-  printChangelog(a, b, changes);
+  const source = selectSchema(config, a, options);
+  const target = selectSchema(config, b, options);
+  const io = source.direction === 'request' ? 'input' : 'output';
+  const changes = diffSchemas(
+    zodToOpenAPISchema(source.schema, io),
+    zodToOpenAPISchema(target.schema, io),
+  );
+  if (options.json) console.log(JSON.stringify(changes, null, 2));
+  else printChangelog(a, b, changes.length ? [{ title: 'Contract Changes', changes }] : []);
 }
 
-/**
- * Extract a simplified shape from the schemas for a specific version.
- *
- * Since schemas are Zod objects, we try to introspect their shape.
- * If the schema is a plain object descriptor, we parse it recursively.
- *
- * This is a best-effort heuristic since Zod schemas may be complex.
- */
-export function extractSchemaShape(config: PylonConfig, version: string): SchemaShape | null {
-  // Look for a schema keyed by the version name, or a naming convention
-  const schemaKeys = Object.keys(config.schemas);
-  const key = schemaKeys.find(
-    (k) => k === version || k.startsWith(version) || version.startsWith(k),
-  );
-
-  if (!key) {
-    // Return a skeleton — no detailed schema info available
-    return null;
+/** Diff JSON schema assertions, including nested fields and constraints. Renames require human intent. */
+export function diffSchemas(a: unknown, b: unknown, path = ''): SchemaChange[] {
+  if (isDeepStrictEqual(a, b)) return [];
+  if (
+    a &&
+    b &&
+    typeof a === 'object' &&
+    typeof b === 'object' &&
+    !Array.isArray(a) &&
+    !Array.isArray(b)
+  ) {
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const changes: SchemaChange[] = [];
+    for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+      if (['$schema', 'description', 'title'].includes(key)) continue;
+      const field = `${path}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+      if (!Object.hasOwn(left, key))
+        changes.push({ type: 'added', field, details: JSON.stringify(right[key]) });
+      else if (!Object.hasOwn(right, key))
+        changes.push({ type: 'removed', field, details: JSON.stringify(left[key]) });
+      else changes.push(...diffSchemas(left[key], right[key], field));
+    }
+    return changes;
   }
+  return [
+    {
+      type: 'changed',
+      field: path || '/',
+      details: `${JSON.stringify(a)} -> ${JSON.stringify(b)}`,
+    },
+  ];
+}
 
-  // We can't deeply introspect Zod schemas at runtime from the CLI,
-  // so we return a shape based on what we can detect
+export function extractSchemaShape(config: PylonConfig, version: string): SchemaShape | null {
+  const schema = config.schemas[version];
+  if (!schema) return null;
+  const json = zodToOpenAPISchema(schema, 'input');
+  const properties = json.properties as Record<string, Record<string, unknown>> | undefined;
+  const required = new Set((json.required ?? []) as string[]);
   return {
-    fields: [],
+    fields: Object.entries(properties ?? {}).map(([name, value]) => ({
+      name,
+      type: typeof value.type === 'string' ? value.type : JSON.stringify(value),
+      required: required.has(name),
+    })),
     nestedSchemas: {},
   };
 }
@@ -149,11 +165,14 @@ export function compareShapes(aShape: SchemaShape, bShape: SchemaShape): Changel
   for (const bField of bFields) {
     if (!aFieldNames.has(bField.name)) continue;
     const aField = aFields.find((f) => f.name === bField.name);
-    if (aField && aField.type !== bField.type) {
+    if (aField && (aField.type !== bField.type || aField.required !== bField.required)) {
       changedFields.push({
         type: 'changed',
         field: bField.name,
-        details: `${aField.type} -> ${bField.type}`,
+        details:
+          aField.required !== bField.required
+            ? `${aField.type} (${aField.required ? 'required' : 'optional'}) -> ${bField.type} (${bField.required ? 'required' : 'optional'})`
+            : `${aField.type} -> ${bField.type}`,
       });
     }
   }
@@ -164,7 +183,7 @@ export function compareShapes(aShape: SchemaShape, bShape: SchemaShape): Changel
   // Renamed fields (heuristic: removed + added with similar names)
   const renamedFields = detectRenames(removedFields, addedFields);
   if (renamedFields.length > 0) {
-    sections.push({ title: 'Renamed Fields', changes: renamedFields });
+    sections.push({ title: 'Possible Renames', changes: renamedFields });
   }
 
   return sections;

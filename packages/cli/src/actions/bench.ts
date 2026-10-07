@@ -1,138 +1,125 @@
-import type { PylonConfig } from '@ossl/pylon-core';
-import { TransformEngine, VersionNormalizer } from '@ossl/pylon-core';
+import { readFileSync } from 'node:fs';
+import { Pylon } from '@ossl/pylon-core';
 import { loadPylonConfig } from '../load-config.js';
 
-/**
- * Options for the bench command.
- */
-export interface BenchOptions {
-  /** Number of transform iterations to run */
+export interface BenchmarkResult {
   iterations: number;
+  coldMs: number;
+  meanMs: number;
+  medianMs: number;
+  p99Ms: number;
+  elapsedMs: number;
+  opsPerSecond: number;
 }
 
-/**
- * Result of a single benchmark run.
- */
-interface BenchSample {
-  /** Duration in milliseconds */
-  durationMs: number;
+/** Each operation must create its own fixture if user transforms can mutate input. */
+export async function runBenchmark(
+  operation: () => unknown | Promise<unknown>,
+  iterations = 1000,
+): Promise<BenchmarkResult> {
+  if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > 1_000_000)
+    throw new Error('Iterations must be an integer between 1 and 1000000');
+  const coldStart = performance.now();
+  await operation();
+  const coldMs = performance.now() - coldStart;
+  for (let i = 0; i < Math.min(iterations, 100); i++) await operation();
+  const samples = new Float64Array(iterations);
+  const start = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    const before = performance.now();
+    await operation();
+    samples[i] = performance.now() - before;
+  }
+  const elapsedMs = performance.now() - start;
+  let sum = 0;
+  for (const sample of samples) sum += sample;
+  samples.sort();
+  return {
+    iterations,
+    coldMs,
+    meanMs: sum / iterations,
+    medianMs:
+      (samples[Math.floor((iterations - 1) / 2)]! + samples[Math.floor(iterations / 2)]!) / 2,
+    p99Ms: samples[Math.ceil(iterations * 0.99) - 1]!,
+    elapsedMs,
+    opsPerSecond: (iterations * 1000) / elapsedMs,
+  };
 }
 
-/**
- * Benchmark transform performance between two versions.
- *
- * Loads the pylon config, creates a TransformEngine, and runs the
- * transforms repeatedly to measure average, median, and p99 latency
- * as well as throughput in operations per second.
- */
+export interface BenchOptions {
+  input: string;
+  response?: string;
+  endpoint?: string;
+  mode?: 'transform' | 'pipeline';
+  iterations?: string | number;
+  json?: boolean;
+}
+
+/** Benchmark real fixtures: parsing, migration, and (pipeline mode) both contract boundaries. */
 export async function benchAction(
   source: string,
   target: string,
-  options: { iterations?: string | number },
+  options: BenchOptions,
 ): Promise<void> {
+  const mode = options.mode ?? 'transform';
+  if (!['transform', 'pipeline'].includes(mode))
+    throw new Error('Mode must be transform or pipeline');
+  const iterations = Number(options.iterations ?? 1000);
+  if (!Number.isSafeInteger(iterations) || iterations < 1 || iterations > 1_000_000)
+    throw new Error('Iterations must be an integer between 1 and 1000000');
   const { config } = await loadPylonConfig();
-
-  const iterations =
-    typeof options.iterations === 'number'
-      ? options.iterations
-      : parseInt(options.iterations ?? '1000', 10) || 1000;
-
-  const normalizer = new VersionNormalizer(config.versions, config.current);
-  const engine = new TransformEngine(config.transforms, config.schemas, normalizer);
-
-  // Build the transform chain to validate it exists
-  try {
-    engine.buildChain(source, target);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Cannot benchmark: ${message}`);
-    process.exit(1);
-  }
-
-  // Compile the transform function
-  const transformFn = engine.compile(source, target, 'request');
-
-  const testData = createTestPayload(config);
-
-  console.error(`Running ${iterations} iterations: ${source} -> ${target} (request direction)`);
-  console.error('');
-
-  // Warmup (10 iterations, no measurement)
-  for (let i = 0; i < 10; i++) {
-    await transformFn(testData);
-  }
-
-  // Benchmark
-  const samples: BenchSample[] = [];
-  for (let i = 0; i < iterations; i++) {
-    const start = performance.now();
-    await transformFn(testData);
-    const end = performance.now();
-    samples.push({ durationMs: end - start });
-  }
-
-  // Calculate statistics
-  const durations = samples.map((s) => s.durationMs);
-  const sorted = [...durations].sort((a, b) => a - b);
-
-  const total = sorted.reduce((sum, d) => sum + d, 0);
-  const avg = total / sorted.length;
-  const med = sorted[Math.floor(sorted.length / 2)] ?? 0;
-  const p99 = sorted[Math.floor(sorted.length * 0.99)] ?? sorted[sorted.length - 1] ?? 0;
-  const min = sorted[0] ?? 0;
-  const max = sorted[sorted.length - 1] ?? 0;
-  const opsPerSec = 1000 / avg;
-
-  // Print report
-  const separator = '─'.repeat(45);
-  console.log(separator);
-  console.log('  Transform Benchmark Report');
-  console.log(separator);
-  console.log('');
-  console.log(`  Source:            ${source}`);
-  console.log(`  Target:            ${target}`);
-  console.log(`  Direction:         request`);
-  console.log(`  Iterations:        ${iterations.toLocaleString()}`);
-  console.log('');
-  console.log(`  Avg duration:      ${avg.toFixed(3)} ms`);
-  console.log(`  Med duration:      ${med.toFixed(3)} ms`);
-  console.log(`  P99 duration:      ${p99.toFixed(3)} ms`);
-  console.log(`  Min duration:      ${min.toFixed(3)} ms`);
-  console.log(`  Max duration:      ${max.toFixed(3)} ms`);
-  console.log(`  Throughput:        ${opsPerSec.toFixed(1)} ops/sec`);
-  console.log('');
-  console.log(separator);
-}
-
-/**
- * Create a test payload for benchmarking.
- *
- * Generates a plausible payload based on the schemas, or a default
- * generic payload if no schemas are defined.
- */
-export function createTestPayload(config: PylonConfig): Record<string, unknown> {
-  // Try to infer payload shape from schemas
-  const schemaKeys = Object.keys(config.schemas);
-  if (schemaKeys.length > 0) {
-    // Generate a generic payload
-    const payload: Record<string, unknown> = {};
-    for (const key of schemaKeys) {
-      payload[key] = 'test_value';
+  const root = new Pylon(config);
+  const pylon = options.endpoint ? root.forEndpoint(options.endpoint) : root;
+  source = pylon.normalizer.resolveAlias(source);
+  target = pylon.normalizer.resolveAlias(target);
+  pylon.engine.buildChain(source, target);
+  if (mode === 'pipeline' && target !== pylon.current)
+    throw new Error('Pipeline benchmark target must be the current version');
+  if (mode === 'pipeline' && !options.response)
+    throw new Error('Pipeline mode requires --response with a current response fixture');
+  const input = readFileSync(options.input, 'utf8');
+  JSON.parse(input);
+  const response = options.response ? readFileSync(options.response, 'utf8') : undefined;
+  if (response !== undefined) JSON.parse(response);
+  const operation = async () => {
+    if (mode === 'transform') {
+      const result = await pylon.transform(source, target, 'request', JSON.parse(input));
+      if (result.status === 'error') throw new Error(result.error?.message);
+      JSON.stringify(result.data);
+    } else {
+      const request = await pylon.processRequest({}, '/', {}, JSON.parse(input), {
+        version: source,
+      });
+      if (request.transformResult.status === 'error')
+        throw new Error(`Request benchmark failed: ${request.transformResult.error?.message}`);
+      const result = await pylon.processResponse(
+        request.version,
+        JSON.parse(response!),
+        request.headers,
+        [],
+      );
+      if (result.status && result.status >= 400)
+        throw new Error(`Response benchmark failed: ${JSON.stringify(result.body)}`);
+      JSON.stringify(result.body);
     }
-    return payload;
-  }
-
-  // Default payload
-  return {
-    id: 'test-123',
-    name: 'test',
-    email: 'test@example.com',
-    age: 30,
-    active: true,
-    tags: ['a', 'b', 'c'],
-    metadata: {
-      source: 'benchmark',
-      timestamp: new Date().toISOString(),
-    },
   };
+  const result = {
+    source,
+    target,
+    endpoint: options.endpoint,
+    mode,
+    inputBytes: Buffer.byteLength(input),
+    responseBytes: response === undefined ? undefined : Buffer.byteLength(response),
+    ...(await runBenchmark(operation, iterations)),
+  };
+  if (options.json) console.log(JSON.stringify(result, null, 2));
+  else {
+    console.log(
+      `${source} -> ${target} (${mode}, ${result.inputBytes} input bytes, ${iterations} iterations)`,
+    );
+    console.log(
+      `Cold: ${result.coldMs.toFixed(3)} ms | warm mean: ${result.meanMs.toFixed(3)} ms | median: ${result.medianMs.toFixed(3)} ms | p99: ${result.p99Ms.toFixed(3)} ms`,
+    );
+    console.log(`Throughput: ${result.opsPerSecond.toFixed(0)} ops/sec`);
+  }
 }
