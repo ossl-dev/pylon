@@ -6,12 +6,13 @@
     "dev": "turbo run dev",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc -p benchmarks/tsconfig.json",
     "clean": "turbo run clean",
     "format": "biome format --write .",
     "changeset": "changeset",
     "ci:version": "changeset version",
-    "ci:publish": "changeset publish"
+    "ci:publish": "changeset publish",
+    "bench": "bun run build && bun benchmarks/versioning.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
