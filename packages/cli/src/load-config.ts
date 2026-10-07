@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import type { PylonConfig, VersionDefinition, VersionsConfig } from '@ossl/pylon-core';
 import { validateConfig } from '@ossl/pylon-core';
+import { createJiti } from 'jiti';
+import { updateConfigSource } from './config-source.js';
 
 const CONFIG_FILES = [
   'pylon.config.ts',
@@ -48,8 +49,8 @@ export interface LoadedConfig {
  *
  * @throws if no config file is found or the config is invalid
  */
-export async function loadPylonConfig(): Promise<LoadedConfig> {
-  const configPath = await findConfig();
+export async function loadPylonConfig(startPath?: string): Promise<LoadedConfig> {
+  const configPath = await findConfig(startPath);
   if (!configPath) {
     throw new Error(
       'No pylon.config.ts found in working directory.\n' + 'Run "pylon init" to create one.',
@@ -73,13 +74,15 @@ export async function loadPylonConfig(): Promise<LoadedConfig> {
  * @returns The absolute path to the config file, or null if not found
  */
 export async function findConfig(startPath?: string): Promise<string | null> {
-  const dir = startPath ? resolve(startPath) : process.cwd();
-
-  for (const file of CONFIG_FILES) {
-    const fullPath = join(dir, file);
-    if (existsSync(fullPath)) {
-      return fullPath;
+  let dir = startPath ? resolve(startPath) : process.cwd();
+  while (true) {
+    for (const file of CONFIG_FILES) {
+      const fullPath = join(dir, file);
+      if (existsSync(fullPath)) return fullPath;
     }
+    const parent = resolve(dir, '..');
+    if (parent === dir) break;
+    dir = parent;
   }
 
   return null;
@@ -97,10 +100,9 @@ async function importConfig(filePath: string): Promise<PylonConfig> {
     return JSON.parse(content) as PylonConfig;
   }
 
-  // Use dynamic import for TypeScript / JavaScript files
-  const fileUrl = pathToFileURL(filePath).href;
-  const mod = await import(fileUrl);
-  return (mod.default ?? mod) as PylonConfig;
+  const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false });
+  const mod = await jiti.import<{ default?: PylonConfig } & PylonConfig>(filePath);
+  return mod.default ?? mod;
 }
 
 /**
@@ -111,9 +113,8 @@ function formatVersionDef(v: VersionDefinition, indent: string): string {
   if (v.deprecated) {
     parts.push('deprecated: true');
   }
-  if (v.sunsetDate) {
-    parts.push(`sunsetDate: ${JSON.stringify(v.sunsetDate)}`);
-  }
+  if (v.sunsetDate) parts.push(`sunsetDate: ${JSON.stringify(v.sunsetDate)}`);
+  if (v.migrationGuide) parts.push(`migrationGuide: ${JSON.stringify(v.migrationGuide)}`);
   return `${indent}{ ${parts.join(', ')} }`;
 }
 
@@ -229,14 +230,6 @@ export function serializeVersions(versions: VersionsConfig): string[] {
       return lines;
     }
     lines.push('  versions: [');
-    for (const v of versions) {
-      lines.push(formatVersionDef(v, '    '));
-      lines.push('    ', ',');
-    }
-    // Remove trailing comma
-    // Actually, let me re-do this more cleanly
-    lines.length = 0;
-    lines.push('  versions: [');
     for (let i = 0; i < versions.length; i++) {
       const comma = i < versions.length - 1 ? ',' : '';
       lines.push(`${formatVersionDef(versions[i]!, '    ')}${comma}`);
@@ -273,14 +266,27 @@ export function serializeVersions(versions: VersionsConfig): string[] {
 /**
  * Write a Pylon config to the given path.
  *
- * Generates a valid TypeScript config file wrapping the config in
- * `defineConfig`. Schemas and transforms are serialized as stubs
- * since they may contain runtime types and functions.
+ * Existing files retain their runtime expressions; only current and versions change.
+ * New files use the initial config scaffold.
  *
  * @param path - Absolute path to write the config file to
  * @param config - The config to write
  */
 export async function writeConfig(path: string, config: PylonConfig): Promise<void> {
-  const content = generateConfigContent(config);
-  writeFileSync(path, content, 'utf-8');
+  if (existsSync(path)) {
+    const source = readFileSync(path, 'utf-8');
+    if (path.endsWith('.json')) {
+      const original = JSON.parse(source);
+      writeFileSync(
+        path,
+        `${JSON.stringify({ ...original, current: config.current, versions: config.versions }, null, 2)}\n`,
+        'utf-8',
+      );
+    } else {
+      const updated = updateConfigSource(source, config);
+      writeFileSync(path, updated, 'utf-8');
+    }
+    return;
+  }
+  writeFileSync(path, generateConfigContent(config), { encoding: 'utf-8', flag: 'wx' });
 }

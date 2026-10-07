@@ -1,4 +1,5 @@
 import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
+import { VersionNormalizer } from '@ossl/pylon-core';
 import { loadPylonConfig, writeConfig } from '../load-config.js';
 
 /**
@@ -8,23 +9,9 @@ import { loadPylonConfig, writeConfig } from '../load-config.js';
  * config's current version (single entry).
  */
 export function ensureVersionsArray(config: PylonConfig): VersionDefinition[] {
-  if (Array.isArray(config.versions)) {
-    return config.versions;
-  }
-
-  // Convert format-based configs to a flat list containing only the current version.
-  const entry: VersionDefinition = {
-    name: config.current,
-    order: 1,
-  };
-
-  if ('preset' in (config.versions ?? {})) {
-    // Stripe preset — single entry
-    return [entry];
-  }
-
-  // Format-based (semantic, numeric, etc.) — single entry
-  return [entry];
+  return new VersionNormalizer(config.versions, config.current)
+    .listVersions()
+    .map((version) => ({ ...version }));
 }
 
 /**

@@ -29,7 +29,7 @@ Commands are wired up with Commander but most action implementations are stubs.
 
 - [ ] Finish `pylon init` — generate a working `pylon.config.ts` by scanning your route files
 - [ ] Finish `pylon scaffold` — generate real transform files (not TODO placeholders)
-- [ ] Finish `pylon generate` — actually run the OpenAPI generator and write the spec to disk
+- [x] Finish `pylon generate openapi` — run the OpenAPI generator and write the spec to disk
 - [ ] Finish `pylon diff` — compare two version configs and show what changed (fields added, removed, renamed)
 - [ ] Finish `pylon audit` — check all registered transforms for gaps, warn about missing version hops
 - [ ] Finish `pylon bench` — run real benchmark suites against transform chains

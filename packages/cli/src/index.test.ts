@@ -665,15 +665,18 @@ describe('ensureVersionsArray', () => {
       { name: 'v2', order: 2 },
     ];
     const config = baseConfig({ current: 'v2', versions });
-    expect(ensureVersionsArray(config)).toBe(versions);
+    expect(ensureVersionsArray(config)).toEqual(versions);
   });
 
-  it('derives a single entry from a format-based config', () => {
+  it('preserves all versions from a format-based config', () => {
     const config = baseConfig({
       current: 'v2',
       versions: { format: 'semantic', prefix: 'v' },
     });
-    expect(ensureVersionsArray(config)).toEqual([{ name: 'v2', order: 1 }]);
+    expect(ensureVersionsArray(config)).toEqual([
+      { name: 'v1', order: 1 },
+      { name: 'v2', order: 2 },
+    ]);
   });
 
   it('derives a single entry from the stripe preset', () => {
@@ -681,7 +684,9 @@ describe('ensureVersionsArray', () => {
       current: '2026-01-01',
       versions: { preset: 'stripe' },
     });
-    expect(ensureVersionsArray(config)).toEqual([{ name: '2026-01-01', order: 1 }]);
+    const versions = ensureVersionsArray(config);
+    expect(versions).toHaveLength(366);
+    expect(versions.at(-1)?.name).toBe('2026-01-01');
   });
 
   it('derives a single entry when versions is undefined', () => {
@@ -722,36 +727,28 @@ describe('extractVersions', () => {
   it('falls back to the current version for format-based configs', () => {
     expect(
       extractVersions(baseConfig({ current: 'v2', versions: { format: 'semantic' } })),
-    ).toEqual(['v2']);
+    ).toEqual(['v1', 'v2']);
   });
 
-  it('falls back to v1 when no versions are defined', () => {
-    expect(extractVersions(baseConfig({ versions: undefined }))).toEqual(['v1']);
+  it('uses current when when no versions are defined', () => {
+    expect(extractVersions(baseConfig({ versions: undefined }))).toEqual(['v2']);
   });
 });
 
 describe('buildOpenAPISpec', () => {
-  it('builds a spec skeleton with a server per version', () => {
+  it('generates schema components and paths for every configured version', () => {
     const config = baseConfig({
-      versions: [
-        { name: 'v1', order: 1 },
-        { name: 'v2', order: 2 },
-      ],
+      versions: { format: 'semantic' },
+      schemas: { v1: z.object({ name: z.string() }), v2: z.object({ fullName: z.string() }) },
     });
-    expect(buildOpenAPISpec(config)).toEqual({
-      openapi: '3.0.3',
-      info: {
-        title: 'API',
-        version: '1.0.0',
-        description: 'API with 2 version(s): v1, v2',
-      },
-      paths: {},
-      components: { schemas: {} },
-      servers: [
-        { url: '/api/v1', description: 'Version v1' },
-        { url: '/api/v2', description: 'Version v2' },
-      ],
-    });
+    const spec = buildOpenAPISpec(config);
+    expect(spec.openapi).toBe('3.1.0');
+    expect(spec.info.version).toBe('v2');
+    expect(spec.components?.schemas?.v1_request.properties.name).toEqual({ type: 'string' });
+    expect(spec.components?.schemas?.v2_request.properties.fullName).toEqual({ type: 'string' });
+    expect(
+      spec.paths['/v1/users']?.post?.requestBody?.content['application/json']?.schema.$ref,
+    ).toBe('#/components/schemas/v1_request');
   });
 });
 

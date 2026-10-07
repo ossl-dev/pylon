@@ -1,11 +1,13 @@
 import type { PylonConfig } from '@ossl/pylon-core';
+import { Pylon, VersionNormalizer } from '@ossl/pylon-core';
+import type { OpenAPISpec } from '@ossl/pylon-openapi';
+import { generateOpenAPI } from '@ossl/pylon-openapi';
 import { loadPylonConfig } from '../load-config.js';
 
 /**
  * Generate an OpenAPI specification from the current config.
  *
  * Outputs a JSON OpenAPI spec to stdout or a file.
- * Currently a stub that describes the planned functionality.
  */
 export async function generateOpenAPIAction(options: { output?: string }): Promise<void> {
   const { config } = await loadPylonConfig();
@@ -13,7 +15,9 @@ export async function generateOpenAPIAction(options: { output?: string }): Promi
   const spec = buildOpenAPISpec(config);
 
   if (options.output) {
-    const { writeFileSync } = await import('node:fs');
+    const { dirname } = await import('node:path');
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(dirname(options.output), { recursive: true });
     writeFileSync(options.output, JSON.stringify(spec, null, 2), 'utf-8');
     console.log(`OpenAPI spec written to ${options.output}`);
   } else {
@@ -22,46 +26,16 @@ export async function generateOpenAPIAction(options: { output?: string }): Promi
 }
 
 /**
- * Build an OpenAPI 3.0 spec skeleton from the config.
+ * Generate paths and JSON schemas using the OpenAPI package.
  */
-export function buildOpenAPISpec(config: PylonConfig): Record<string, unknown> {
-  const versions = extractVersions(config);
-
-  return {
-    openapi: '3.0.3',
-    info: {
-      title: 'API',
-      version: '1.0.0',
-      description: `API with ${versions.length} version(s): ${versions.join(', ')}`,
-    },
-    paths: {},
-    components: {
-      schemas: {},
-    },
-    servers: versions.map((v: string) => ({
-      url: `/api/${v}`,
-      description: `Version ${v}`,
-    })),
-  };
+export function buildOpenAPISpec(config: PylonConfig): OpenAPISpec {
+  return generateOpenAPI(new Pylon(config));
 }
 
-/**
- * Extract version names from the config.
- */
 export function extractVersions(config: PylonConfig): string[] {
-  const versions = config.versions;
-
-  if (Array.isArray(versions)) {
-    return versions.map((v) => String(v.name ?? ''));
-  }
-
-  if (versions && typeof versions === 'object') {
-    // Format-based or preset — just use the current version
-    const current = config.current;
-    return current ? [String(current)] : ['v1'];
-  }
-
-  return ['v1'];
+  return new VersionNormalizer(config.versions, config.current)
+    .listVersions()
+    .map((version) => version.name);
 }
 
 /**

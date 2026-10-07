@@ -28,10 +28,12 @@
   },
   "dependencies": {
     "@ossl/pylon-core": "workspace:*",
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "typescript": "^6.0.3",
+    "jiti": "^2.6.1",
+    "@ossl/pylon-openapi": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^6.0.3",
     "vitest": "^4.1.8",
     "@types/node": "^25.9.3"
   },

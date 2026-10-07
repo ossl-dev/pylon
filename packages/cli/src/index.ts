@@ -184,4 +184,7 @@ program
     await benchAction(source, target, { iterations: parseInt(options.iterations, 10) || 1000 });
   });
 
-program.parse(process.argv);
+program.parseAsync(process.argv).catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});
