@@ -7,101 +7,69 @@ Dead simple API versioning.
 
 ---
 
-## The Problem
+## Why Pylon
 
-Every API eventually breaks its contract. Engineering teams then face a choice: fork the codebase and maintain N parallel versions, or force every customer onto the latest version with a migration window. Neither scales.
+Keep one current handler while supporting older API contracts. Each endpoint declares its request and response schemas for every supported release. Explicit migrations upgrade requests and downgrade successful JSON responses.
 
-Codebase forks create exponential maintenance burden. A bug in one version must be found and fixed in N versions. Customer migrations create tension between product velocity and reliability. Well funded teams like Stripe, Twilio, and Shopify solved this by building internal versioning layers. Everyone else reinvents broken solutions.
-
-Pylon is that internal versioning layer, released as open source.
-
----
-
-## How It Works
-
-You maintain one codebase, the current version. Pylon intercepts every request, upgrades it to the current version, runs your modern controller, and downgrades the response back to the caller's version.
-
-```
-Client (v2)
-  -> Version Detection
-  -> Request Transform: v2 -> v4 (fills in defaults)
-  -> Schema Validation: v4
-  -> Controller (only knows v4)
-  -> Response Transform: v4 -> v2
-  -> Client (v2)
-```
-
-Requests on the current version skip the transform chain. Historical versions run cached adjacent transforms; latency depends on the functions you provide.
-
----
+Schemas enforce payload shapes. Historical fixtures verify behavior. Changes to authorization, database semantics, or side effects still need application tests.
 
 ## Quick Start
 
+Run `pylon init` to create `pylon.config.ts` and a runnable Hono example. Or define an operation directly:
+
 ```typescript
-import { Pylon } from '@ossl/pylon-core';
-import { defaults, drop } from '@ossl/pylon-transforms';
+import { defineEndpoint, Pylon, type EndpointInput, type EndpointResult } from '@ossl/pylon-core';
+import { pylonHono } from '@ossl/pylon-hono';
+import { Hono } from 'hono';
 import { z } from 'zod';
 
-const pylon = new Pylon({
-  current: 'v4',
-  defaultVersion: 'v4',
-  versions: [
-    { name: 'v2', order: 1 },
-    { name: 'v3', order: 2 },
-    { name: 'v4', order: 3 },
-  ],
-
-  schemas: {
-    v2: z.object({
-      name: z.string(),
-      address_line_1: z.string(),
-      city: z.string(),
-    }),
-    v3: z.object({
-      fullName: z.string(),
-      address: z.object({
-        street: z.string(),
-        city: z.string(),
-      }),
-    }),
-    v4: z.object({
-      fullName: z.string(),
-      address: z.object({
-        street: z.string(),
-        city: z.string(),
-        country: z.string().default('US'),
-      }),
-      email: z.string().email(),
-    }),
-  },
-
-  transforms: {
-    'v2->v3': {
-      request: (req) => ({
-        fullName: req.name,
-        address: {
-          street: req.address_line_1,
-          city: req.city,
-        },
-      }),
-      response: (res) => ({
-        name: res.fullName,
-        address_line_1: res.address.street,
-        city: res.address.city,
-      }),
+const createUser = defineEndpoint({
+  method: 'POST',
+  path: '/users',
+  contracts: {
+    v1: {
+      request: z.object({ name: z.string() }),
+      response: z.object({ id: z.number(), name: z.string() }),
     },
-    'v3->v4': {
-      request: (req) => defaults(req, {
-        address: { country: 'US' },
-        email: 'unknown@example.com',
-      }),
-      response: (res) => drop(res, ['email']),
+    v2: {
+      request: z.object({ fullName: z.string() }),
+      response: z.object({ id: z.number(), fullName: z.string(), createdAt: z.iso.datetime() }),
+    },
+  },
+  transforms: {
+    'v1->v2': {
+      request: (input) => ({ fullName: input.name }),
+      response: (output) => ({ id: output.id, name: output.fullName }),
     },
   },
 });
+const pylon = new Pylon({
+  current: 'v2',
+  versions: ['v1', 'v2'],
+  endpoints: { createUser },
+});
+const app = new Hono();
+app.use('*', pylonHono(pylon));
+app.post('/users', async (c) => {
+  const input = await c.req.json<EndpointInput<typeof createUser, 'v2'>>();
+  const output: EndpointResult<typeof createUser, 'v2'> = {
+    id: 1, fullName: input.fullName, createdAt: new Date().toISOString(),
+  };
+  return c.json(output);
+});
 ```
 
-Schemas validate upgraded request bodies at runtime. Use contract tests to check that transforms preserve the behavior expected by historical clients.
+Send `api-version: v1` with `{"name":"Ada"}`; receive `{"id":1,"name":"Ada"}`. The handler always receives `fullName`. Contract projects default to this single version header; omitted headers select `current`.
+
+Migration inputs and outputs are inferred from schemas. Request migrations accept parsed source input and produce target schema input; response migrations accept parsed current output and produce historical schema input. Each hop parses once, including Zod defaults, coercions, async refinements, and serialization transforms. `EndpointResult` describes handler output before parsing; `EndpointOutput` describes the resulting wire value.
+
+Startup rejects missing contracts, missing migration directions, unknown versions, and invalid routes. Use `'identity'` explicitly when a direction is unchanged. String arrays list published releases in order: `['2026-01-01', '2026-04-15']` needs one hop. Date ranges generate every intermediate date and therefore require every hop.
+
+Adapters select endpoint contracts by method and path, including whole-segment `:id` parameters. Routes outside a contract-only configuration pass through. Use `pylon.forEndpoint('createUser')` for low-level transforms or endpoint-specific tests; unknown names throw.
+
+Invalid client payloads return 422; migration bugs and invalid handler output return 500. HTTP errors, HEAD, 204/205 responses, and non-JSON streams pass through. Successful JSON responses on the current version also validate. Declare the intended success status with `status` for OpenAPI output.
+
+Global `schemas` and `transforms` remain available for legacy integrations. They validate current requests and cannot distinguish request and response contracts. `pylon doctor` audits their migration paths without executing user functions.
 
 ---
 
@@ -145,7 +113,7 @@ Presets: `semantic`, `numeric`, `date-monthly`, `date-daily`, `calver`, `stripe`
 
 ## Framework Adapters
 
-Pylon works with every major Node.js framework:
+Adapters support Hono, Express, Fastify, Koa, and Next.js App Router:
 
 ```typescript
 // Hono (cleanest integration)
@@ -175,63 +143,71 @@ The Express adapter monkey patches `res.json`/`res.send`/`res.end`. It works but
 
 ## Webhook Versioning
 
-Pylon versions webhooks using the same transform engine. Register a webhook endpoint with its version:
+Webhook payloads use response migrations. Scope the instance to the operation whose response contract matches the event payload:
 
 ```typescript
 import { PylonWebhook } from '@ossl/pylon-webhooks';
 
-const pylonWebhook = new PylonWebhook(pylon);
-
-await pylonWebhook.register({
-  url: 'https://customer.com/webhook',
-  events: ['user.created'],
-  version: 'v2',
-  secret: 'whsec_...',
+const webhooks = new PylonWebhook(pylon.forEndpoint('createUser'));
+await webhooks.register({
+  url: 'https://customer.example/webhook', events: ['user.created'], version: 'v1', secret: 'whsec_...',
 });
-
-// Pylon automatically transforms the payload to v2 format
-await pylonWebhook.send({
+await webhooks.send({
   event: 'user.created',
-  payload: { fullName: 'John Doe', email: 'john@example.com', address: { ... } },
+  payload: { id: 1, fullName: 'Ada', createdAt: new Date().toISOString() },
 });
 ```
 
----
+## Historical Contract Tests
 
-## Time Travel Testing
-
-Write tests once against the current version. Pylon runs them against every historical version automatically.
+Send fixtures in the selected version's wire format and assert the actual wire response. Request and response migrations can be lossy; the test helper never guesses an inverse.
 
 ```typescript
 import { timeTravel } from '@ossl/pylon-testing';
 
-it('POST /users works across versions', async () => {
-  await timeTravel(pylon, async (version, request) => {
-    const response = await request('POST', '/users', {
-      body: { fullName: 'John Doe', email: 'john@example.com', address: { ... } },
-    });
-    expect(response.status).toBe(201);
+await timeTravel(pylon.forEndpoint('createUser'), async (version, request) => {
+  const response = await request('POST', '/users', {
+    body: version === 'v1' ? { name: 'Ada' } : { fullName: 'Ada' },
   });
-});
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual(version === 'v1'
+    ? { id: 1, name: 'Ada' }
+    : { id: 1, fullName: 'Ada', createdAt: expect.any(String) });
+}, { baseUrl: 'http://localhost:3000' });
 ```
 
----
+`timeTravel` and `snapshotVersion` default to published versions and verify that the request selects the intended release. Snapshots contain wire responses. Supply explicit versions to test rejected releases; snapshot callbacks receive the selected version as their second argument.
 
 ## CLI
 
+```sh
+pylon init                          # Working two-version config and Hono example
+bun pylon.example.ts                # Run both fixtures in process
+pylon doctor --json                 # Validate contracts and migration coverage
+pylon schema show v1 --endpoint createUser --direction response
+pylon schema validate v1 --endpoint createUser --input request.json
+pylon diff v1 v2 --endpoint createUser --direction response --json
+pylon generate openapi --version v1 -o openapi-v1.json
+pylon generate openapi --all-versions -o specs
+pylon bench v1 v2 --endpoint createUser --mode pipeline \
+  --input request.json --response response.json -n 1000 --json
+pylon version deprecate v1
+pylon version unpublish v1
+pylon version publish v1
+pylon version retire v1
 ```
-pylon init                          Create config interactively
-pylon init --preset stripe          Use Stripe versioning
-pylon version list                  Show all versions
-pylon version add v5                Add new version
-pylon version deprecate v2          Mark deprecated
-pylon version unpublish v4          Emergency rollback
-pylon audit ./src                   Analyze code for version patterns
-pylon diff v3 v4                    Show changelog
-pylon generate openapi              Generate OpenAPI spec
-pylon playground                    Transform Playground web UI
-pylon bench v2 v4                  Benchmark transform performance
-```
+
+OpenAPI uses declared methods, paths, statuses, and separate request/response schemas. It does not invent routes for legacy global schemas. Combined specs use `anyOf` for overlapping release schemas; separate specs describe one release.
+
+Unpublish rejects requests after config reload. Retirement retains contracts and migration hops so newer clients still work. Retired releases cannot be republished. Contract rollbacks use `reject`; clients explicitly select a published release. Version edits validate before writing and preserve runtime schemas and functions.
+
+Schema diffs report fields and JSON schema constraints. Renames require intent; matching shapes cannot prove a rename. Scaffolding, generated changelogs, and the playground remain unfinished.
+
+## Performance
+
+Execution steps, composed functions, endpoint instances, and route matchers are cached per configuration. Static route selection uses a map. Synchronous migrations avoid unnecessary awaits; asynchronous migrations remain supported.
+
+`pylon bench` measures your fixtures, with parsing, migrations, validation in pipeline mode, and serialization. Results include cold latency, warm mean/median/p99, and throughput. `bun run bench -- 1000 --json` runs the repository matrix: core, Hono, Next, plain Hono baseline, roughly 1/16/64 KiB payloads, zero/one/three hops, sync/async migrations. These are sequential in-process measurements; use load tests for network latency and concurrency.
 
 ---
 
@@ -245,39 +221,16 @@ Set `debug.enabled` to include transform traces in processing results. The debug
 
 ## Response Headers
 
-Pylon injects standard HTTP headers:
-
-```
-X-API-Version: v4
-X-API-Version-Requested: v2
+```http
+X-API-Version: v2
 Deprecation: true
 Sunset: Sat, 31 Dec 2026 23:59:59 GMT
-Link: <https://docs.example.com/migrate-v2-to-v4>; rel="deprecation"
+Link: <https://docs.example.com/migrate-v1-to-v2>; rel="sunset"
 ```
 
----
+`X-API-Version` identifies the current implementation. Deprecation headers describe the requested release. Configure sources, missing/invalid-version policies, and response headers through `versioning`.
 
-## Migration
-
-The planned migration workflow has 5 phases. Audit is available; scaffolding and the playground remain unfinished:
-
-1. **Audit**: `pylon audit ./src` finds all versioning patterns in your codebase
-2. **Scaffold**: `pylon scaffold ./src` generates initial config and transforms
-3. **Gradual adoption**: Wrap one endpoint at a time alongside existing versioning
-4. **Dual running**: Shadow mode logs what Pylon would do without transforming
-5. **Cutover**: Remove old versioning code
-
-No big bang migrations. No rewrites.
-
----
-
-## Architecture
-
-Three pillars:
-
-* **Schemas**: Runtime request validation with Zod and OpenAPI spec generation.
-* **Transforms**: Functions that convert between adjacent versions. Execution steps and composed functions are cached per engine. Synchronous and asynchronous functions are supported.
-* **Adapters**: Framework specific request and response interception.
+Debug output can include payloads; enable it only where that is appropriate. Use `debug.enabled` and observability callbacks. The former `rateLimit`, response `headers.debug`, and observability boolean switches are rejected because they never implemented those features.
 
 ---
 

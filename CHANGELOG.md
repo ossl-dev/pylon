@@ -10,6 +10,19 @@
 - Fix time-travel version headers, contract round trips, and replay of lossy webhook payloads. Webhook history defaults to 1000 deliveries, configurable with `historyLimit`.
 - Preserve JSON fields without changing output prototypes; handle cyclic defaults and spaced or Unicode combined values.
 
+- Add typed endpoint request/response contracts, startup coverage validation, explicit identity migrations, and sparse release lists.
+- Parse every contract hop, validate current JSON responses, preserve cookies and streams, and bypass undeclared routes.
+- Add runnable CLI onboarding, `doctor --json`, real schema inspection/diffs, per-release OpenAPI output, and fixture pipeline benchmarks.
+- Retain retired migration history; persisted unpublish/retire metadata rejects requests after reload.
+- Add a core/Hono/Next benchmark matrix; avoid cloning response streams when replacing their bodies.
+
+### Compatibility changes
+
+- `timeTravel` and `snapshotVersion` send historical wire fixtures and return actual wire responses. They no longer infer inverse request/response migrations.
+- Contract migrations require both directions, using `'identity'` when unchanged. Contract rollbacks reject unpublished releases; clients select alternatives explicitly.
+- Unknown endpoint names now throw. Unimplemented rate-limit and observability boolean options are rejected; use host middleware and observability callbacks.
+- OpenAPI uses declared operation paths; legacy global schemas export components without invented routes.
+
 ### Added
 - Unit tests for all adapter packages: koa (21), next (18), openapi (44), webhooks (22), testing (24), cli (76)
 - GitHub Actions CI workflow: lint, typecheck, test matrix (Node 22/24, Bun 1.x), dependency audit
@@ -21,7 +34,7 @@
 
 ### Fixed
 - Koa adapter: shadow mode now sets Pylon response headers (X-API-Version, X-Pylon-Debug)
-- OpenAPI generator: zod v4 `_def` compatibility — enum entries, literal values, array element type, string/number checks
+- OpenAPI generator: public Zod JSON schema conversion, independent request/response schemas, and recursive reference rebasing
 - CLI audit: route handler detection now correctly counts handlers instead of dead `lastIndex` check
 - Biome config `$schema` updated from 1.9.4 to 2.5.0
 - Vitest version normalized across all packages (devtools was on 3.1.2, now 4.1.8)

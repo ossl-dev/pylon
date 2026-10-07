@@ -6,6 +6,28 @@ Things to build, fix, and improve. Checked boxes mean shipped.
 
 ---
 
+## Current focus: contract confidence
+
+Make one current implementation reliable for every published client release. Runtime schemas, inferred migration types, HTTP tests, and generated specs share each endpoint's contracts.
+
+- [x] Separate request and response contracts per endpoint; infer migration inputs and outputs
+- [x] Validate adjacent migration coverage at startup; require explicit identity directions
+- [x] Support sparse release lists and retain retired migration history
+- [x] Validate every migration hop, including async schemas, defaults, and coercions
+- [x] Test historical wire fixtures without inferring request/response inverses
+- [x] Generate specs from real methods and paths, including one spec per published release
+- [x] Generate a runnable two-version starter; audit configs with `doctor --json`
+- [x] Inspect and diff real JSON schemas, including nested constraints
+- [x] Measure core and adapter pipelines across payload sizes and sync/async hops
+- [ ] Scaffold migrations from explicit rename/default decisions, then generate wire fixture tests
+- [ ] Enforce payload size budgets in buffering adapters
+- [ ] Add HTTP load benchmarks with concurrency, memory use, and network latency
+- [ ] Add adoption examples for existing production routes
+
+Framework expansion, dashboards, and automatic semantic inference follow this work.
+
+---
+
 ## Phase 1 — Ship what we have
 
 Stuff that's built but not finished, tested, or released.
@@ -16,7 +38,7 @@ Core, transforms, adapters, CLI, OpenAPI, testing, and webhooks have unit covera
 
 - [x] Add unit tests for `@ossl/pylon-koa` — middleware, shadow mode, error paths
 - [x] Add unit tests for `@ossl/pylon-next` — route handler wrapper, request passthrough
-- [x] Add unit tests for `@ossl/pylon-openapi` — Zod-to-OpenAPI conversion, path inference, edge cases
+- [x] Add unit tests for `@ossl/pylon-openapi` — Zod-to-OpenAPI conversion, declared endpoint paths, recursive schemas, edge cases
 - [x] Add unit tests for `@ossl/pylon-testing` — timeTravel, snapshotVersion, testTransform, assertContract
 - [x] Add unit tests for `@ossl/pylon-webhooks` — registration, send, migration grace period, replay
 - [x] Add unit tests for `@ossl/pylon-cli` — each action (init, diff, scaffold, generate, bench, audit, transform)
@@ -25,16 +47,16 @@ Core, transforms, adapters, CLI, OpenAPI, testing, and webhooks have unit covera
 
 ### CLI
 
-Commands are wired up with Commander but most action implementations are stubs.
+Onboarding, diagnosis, schema inspection, spec generation, and fixture benchmarks work. Scaffolding and generated changelogs remain unfinished.
 
-- [ ] Finish `pylon init` — generate a working `pylon.config.ts` by scanning your route files
+- [x] Finish `pylon init` — generate typed contracts and a runnable example; scanning only suggests release labels
 - [ ] Finish `pylon scaffold` — generate real transform files (not TODO placeholders)
 - [x] Finish `pylon generate openapi` — run the OpenAPI generator and write the spec to disk
-- [ ] Finish `pylon diff` — compare two version configs and show what changed (fields added, removed, renamed)
+- [x] Finish `pylon diff` — compare actual JSON schema fields and constraints; do not infer renames
 - [ ] Finish `pylon audit` — check all registered transforms for gaps, warn about missing version hops
-- [ ] Finish `pylon bench` — run real benchmark suites against transform chains
-- [ ] Add `pylon doctor` — check project setup, config validity, adapter compatibility
-- [ ] Add `--json` output flag for CI consumption
+- [x] Finish `pylon bench` — measure real fixtures through transforms or the full request/response pipeline
+- [x] Add `pylon doctor` — check config validity, endpoint contracts, and migration paths
+- [x] Add `--json` output for doctor, diff, and benchmark commands
 
 ### Docs
 
@@ -84,7 +106,7 @@ Make the engine faster, safer, more flexible.
 
 ### Transform engine
 
-- [ ] Add transform chain validation at config time — warn if a chain produces invalid intermediate shapes
+- [x] Validate contract coverage at config time and intermediate shapes at runtime
 - [ ] Add `beforeAll` / `afterAll` hooks — run a transform before/after every version hop (useful for logging, metrics, auth header migration)
 - [ ] Support conditional transforms — "if the request has field X, apply this transform; otherwise skip"
 - [ ] Add transform dry-run mode — pass a sample payload through a chain and see each step's output
@@ -99,10 +121,10 @@ Make the engine faster, safer, more flexible.
 
 ### Config
 
-- [ ] Add `$schema` field to generated config for editor autocomplete
+- [x] Infer config literals and migration callback types from TypeScript and Zod
 - [ ] Config file merging — load `pylon.config.ts` + env-specific overrides
-- [ ] Validate that every version hop has a registered transform (warn on gaps)
-- [ ] Detect circular transform chains at config time
+- [x] Validate every contract version hop; doctor reports legacy gaps
+- [x] Detect request cycles; contract migrations must follow adjacent forward releases
 
 ### Error handling
 
@@ -127,10 +149,10 @@ New capabilities that expand what Pylon can version.
 
 Pylon currently requires you to write transforms by hand. The long-term vision is schema-awareness.
 
-- [ ] **Schema diff** — diff two Zod schemas and detect added, removed, renamed, and retyped fields
-- [ ] **Auto-generate transforms from schema diffs** — rename fields, add defaults, drop removed fields automatically
+- [x] **Schema diff** — export Zod through its public JSON schema API and compare fields and constraints
+- [ ] **Scaffold transforms from schema diffs** — require explicit rename, default, and removal decisions
 - [ ] **Schema evolution linting** — warn on breaking changes (field removed without deprecation, type narrowed)
-- [ ] **OpenAPI versioned specs** — generate one OpenAPI spec per version, not just the current one
+- [x] **OpenAPI versioned specs** — generate one OpenAPI spec per published version
 
 ### Version management UX
 
@@ -217,7 +239,7 @@ The `@ossl/pylon-devtools` package is a stub. Build it out.
 
 Longer-term, research-heavy items. Don't need to start soon, but worth thinking about.
 
-- [ ] **Bidirectional transforms** — given a forward transform (v1 → v2), can we infer the reverse? For simple renames and defaults, yes. For structural changes, probably not. Explore how far we can push it.
+- [ ] **Migration generation** — generate both directions from explicit mapping rules. Request and response contracts are independent; never infer one from the other.
 - [ ] **Version deprecation enforcement** — at the proxy/infrastructure level, block requests from sunset versions (410 Gone) before they reach your app
 - [ ] **Distributed version registry** — a central (or federated) registry of API versions across services in an org. "Service A v3 depends on Service B v2."
 - [ ] **A/B version testing** — route a percentage of traffic to a new version, compare error rates and latency
@@ -229,7 +251,7 @@ Longer-term, research-heavy items. Don't need to start soon, but worth thinking 
 
 Not triaged into phases. Fix anytime.
 
-- [ ] **Express adapter monkey-patches `res.json`/`res.send`/`res.end`** — works but fragile. Interceptors are restored after each response, but concurrent requests or middleware that caches `res` methods will break.
+- [ ] **Express interception** — methods are patched per response and restored. Verify middleware that captures response methods and investigate router-level alternatives.
 - [x] **Webhook signing** — HMAC-SHA256 via Web Crypto.
 - [x] **Date format normalizers** — UTC ranges with explicit bounds and calendar validation.
 - [x] **TypeScript version mismatch** — every package uses 6.x.
