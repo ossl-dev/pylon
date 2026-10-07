@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
 import { Pylon } from '@ossl/pylon-core';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { pylonNext, pylonNextShadow } from './index.js';
 
@@ -83,7 +83,10 @@ const v2Payload = {
   city: 'SF',
 };
 
-function makeRequest(path: string, options?: { method?: string; headers?: Record<string, string>; body?: unknown }): Request {
+function makeRequest(
+  path: string,
+  options?: { method?: string; headers?: Record<string, string>; body?: unknown },
+): Request {
   return new Request(`http://localhost${path}`, {
     method: options?.method ?? 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },

@@ -1,27 +1,57 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env.*local"],
+  "globalDependencies": [
+    "**/.env.*local",
+    "tooling/typescript/base.json",
+    "tooling/biome/base.json",
+    "biome.json"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "src/**", "tsconfig.json"],
-      "outputs": ["dist/**", ".tsbuildinfo"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**",
+        "tsconfig.json"
+      ],
+      "outputs": [
+        "dist/**",
+        ".tsbuildinfo"
+      ]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "test": {
-      "dependsOn": ["build"],
-      "inputs": ["$TURBO_DEFAULT$", "src/**", "tsconfig.json", "vitest.config.ts"],
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**",
+        "tsconfig.json",
+        "vitest.config.ts"
+      ],
       "outputs": []
     },
     "typecheck": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**",
+        "tsconfig.json"
+      ]
     },
     "lint": {
-      "inputs": ["src/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**"
+      ]
     },
     "clean": {
       "cache": false

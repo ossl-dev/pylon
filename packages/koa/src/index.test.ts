@@ -1,9 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import Koa from 'koa';
-import { createServer } from 'http';
-import { request as httpRequest } from 'http';
-import type { AddressInfo } from 'net';
 import { Pylon } from '@ossl/pylon-core';
+import { createServer, request as httpRequest } from 'http';
+import Koa from 'koa';
+import type { AddressInfo } from 'net';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { pylonKoa, pylonKoaShadow } from './index.js';
 
@@ -162,7 +161,11 @@ function requestKoa(
 }
 
 function tryParse(raw: string): unknown {
-  try { return JSON.parse(raw); } catch { return raw; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
 }
 
 // ---- test payloads ----

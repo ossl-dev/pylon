@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { Pylon } from './pylon.js';
 
@@ -182,9 +182,7 @@ describe('Pylon', () => {
       );
       expect(result.headers['Deprecation']).toBe('true');
       expect(result.headers['Sunset']).toBe('2025-01-01');
-      expect(result.headers['Link']).toBe(
-        '<https://docs.example.com/migration>; rel="sunset"',
-      );
+      expect(result.headers['Link']).toBe('<https://docs.example.com/migration>; rel="sunset"');
     });
   });
 
@@ -328,11 +326,7 @@ describe('Pylon', () => {
   describe('detectVersion', () => {
     it('delegates to VersionDetector', () => {
       const pylon = createPylon();
-      const result = pylon.detectVersion(
-        { 'api-version': 'v1' },
-        '/users',
-        {},
-      );
+      const result = pylon.detectVersion({ 'api-version': 'v1' }, '/users', {});
       expect(result.version).toBe('v1');
       expect(result.source).toBe('header');
     });

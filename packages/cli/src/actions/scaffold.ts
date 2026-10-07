@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, resolve, extname } from 'node:path';
-import { writeConfig } from '../load-config.js';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
+import { writeConfig } from '../load-config.js';
 
 /**
  * Options for the scaffold command.
@@ -94,7 +94,9 @@ export async function scaffoldAction(path: string, options: ScaffoldOptions): Pr
     console.error(`    - schemas/${sanitizeFilename(v)}.ts`);
   }
   for (let i = 0; i < uniqueVersionStrs.length - 1; i++) {
-    console.error(`    - transforms/${sanitizeFilename(uniqueVersionStrs[i]!)}-to-${sanitizeFilename(uniqueVersionStrs[i + 1]!)}.ts`);
+    console.error(
+      `    - transforms/${sanitizeFilename(uniqueVersionStrs[i]!)}-to-${sanitizeFilename(uniqueVersionStrs[i + 1]!)}.ts`,
+    );
   }
   console.error(`    - pylon.config.ts`);
   console.error('');
@@ -136,8 +138,7 @@ export function detectVersions(dir: string): string[] {
 
             // Look for version strings in code
             const versionRegex = new RegExp(VERSION_IN_CODE.source, 'g');
-            let match: RegExpExecArray | null;
-            while ((match = versionRegex.exec(content)) !== null) {
+            for (const match of content.matchAll(versionRegex)) {
               if (match[1] && !versions.includes(match[1])) {
                 versions.push(match[1]);
               }
@@ -145,7 +146,7 @@ export function detectVersions(dir: string): string[] {
 
             // Look for version comparisons
             const comparisonRegex = new RegExp(VERSION_COMPARISON.source, 'g');
-            while ((match = comparisonRegex.exec(content)) !== null) {
+            for (const match of content.matchAll(comparisonRegex)) {
               if (match[1] && !versions.includes(match[1])) {
                 versions.push(match[1]);
               }
@@ -153,7 +154,7 @@ export function detectVersions(dir: string): string[] {
 
             // Look for versioned routes
             const routeRegex = new RegExp(ROUTE_WITH_VERSION.source, 'g');
-            while ((match = routeRegex.exec(content)) !== null) {
+            for (const match of content.matchAll(routeRegex)) {
               if (match[1] && !versions.includes(match[1])) {
                 versions.push(match[1]);
               }

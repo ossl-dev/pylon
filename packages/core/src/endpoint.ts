@@ -60,11 +60,7 @@ export function mergeConfigs(global: PylonConfig, endpoint: EndpointConfig): Pyl
  * @param config - Endpoint-specific configuration overrides
  * @returns A new Pylon instance configured for the endpoint
  */
-export function createEndpoint(
-  pylon: Pylon,
-  _endpointName: string,
-  config: EndpointConfig
-): Pylon {
+export function createEndpoint(pylon: Pylon, _endpointName: string, config: EndpointConfig): Pylon {
   const mergedConfig = mergeConfigs(pylon.config, config);
   const endpointPylon = new Pylon(mergedConfig);
   return endpointPylon;
@@ -98,15 +94,13 @@ export function matchEndpoint(pattern: string, path: string): boolean {
     .replace(/\*/g, '__SINGLESTAR__');
 
   // Convert to regex
-  let regexStr = '^' + escaped
-    .replace(/__DOUBLESTAR__/g, '.*')
-    .replace(/__SINGLESTAR__/g, '[^/]*') + '$';
+  let regexStr =
+    '^' + escaped.replace(/__DOUBLESTAR__/g, '.*').replace(/__SINGLESTAR__/g, '[^/]*') + '$';
 
   // Handle ** at the end matching trailing segments
   if (normalizedPattern.endsWith('**')) {
-    regexStr = '^' + escaped
-      .replace(/__DOUBLESTAR__/g, '.*')
-      .replace(/__SINGLESTAR__/g, '[^/]*') + '$';
+    regexStr =
+      '^' + escaped.replace(/__DOUBLESTAR__/g, '.*').replace(/__SINGLESTAR__/g, '[^/]*') + '$';
   }
 
   const regex = new RegExp(regexStr);

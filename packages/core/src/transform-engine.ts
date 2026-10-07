@@ -1,5 +1,11 @@
-import type { TransformPair, TransformDirection, SchemaMap, TransformResult, TransformErrorConfig } from './types.js';
-import { VersionNormalizer } from './version-normalizer.js';
+import type {
+  SchemaMap,
+  TransformDirection,
+  TransformErrorConfig,
+  TransformPair,
+  TransformResult,
+} from './types.js';
+import type { VersionNormalizer } from './version-normalizer.js';
 
 /**
  * Error thrown when a transform operation fails.
@@ -35,7 +41,7 @@ export class TransformEngine {
   constructor(
     transforms: Record<string, TransformPair>,
     schemas: SchemaMap,
-    normalizer: VersionNormalizer
+    normalizer: VersionNormalizer,
   ) {
     this.transforms = new Map(Object.entries(transforms));
     this.schemas = schemas;
@@ -60,19 +66,15 @@ export class TransformEngine {
     const targetOrder = this.normalizer.normalize(target);
 
     if (sourceOrder === null) {
-      throw new TransformError(
-        `Unknown source version: "${source}"`,
-        'INVALID_SOURCE_VERSION',
-        { source }
-      );
+      throw new TransformError(`Unknown source version: "${source}"`, 'INVALID_SOURCE_VERSION', {
+        source,
+      });
     }
 
     if (targetOrder === null) {
-      throw new TransformError(
-        `Unknown target version: "${target}"`,
-        'INVALID_TARGET_VERSION',
-        { target }
-      );
+      throw new TransformError(`Unknown target version: "${target}"`, 'INVALID_TARGET_VERSION', {
+        target,
+      });
     }
 
     this.validateChain(source, target);
@@ -89,19 +91,17 @@ export class TransformEngine {
       for (let order = sourceOrder; order < targetOrder; order++) {
         const next = this.normalizer.denormalize(order + 1);
         if (!next) {
-          throw new TransformError(
-            `Missing version at order ${order + 1}`,
-            'MISSING_VERSION',
-            { order: order + 1 }
-          );
+          throw new TransformError(`Missing version at order ${order + 1}`, 'MISSING_VERSION', {
+            order: order + 1,
+          });
         }
         const key = `${current}->${next}`;
         if (!this.transforms.has(key)) {
-          throw new TransformError(
-            `Missing transform: ${key}`,
-            'MISSING_TRANSFORM',
-            { source: current, target: next, key }
-          );
+          throw new TransformError(`Missing transform: ${key}`, 'MISSING_TRANSFORM', {
+            source: current,
+            target: next,
+            key,
+          });
         }
         chain.push(key);
         current = next;
@@ -114,11 +114,9 @@ export class TransformEngine {
       for (let order = sourceOrder; order > targetOrder; order--) {
         const prev = this.normalizer.denormalize(order - 1);
         if (!prev) {
-          throw new TransformError(
-            `Missing version at order ${order - 1}`,
-            'MISSING_VERSION',
-            { order: order - 1 }
-          );
+          throw new TransformError(`Missing version at order ${order - 1}`, 'MISSING_VERSION', {
+            order: order - 1,
+          });
         }
         // Try backward key first, then forward key
         const backwardKey = `${current}->${prev}`;
@@ -128,7 +126,7 @@ export class TransformEngine {
           throw new TransformError(
             `Missing transform: ${backwardKey} or ${forwardKey}`,
             'MISSING_TRANSFORM',
-            { source: current, target: prev, backwardKey, forwardKey }
+            { source: current, target: prev, backwardKey, forwardKey },
           );
         }
         chain.push(key);
@@ -153,7 +151,7 @@ export class TransformEngine {
   compile(
     source: string,
     target: string,
-    direction: TransformDirection
+    direction: TransformDirection,
   ): (input: any) => any | Promise<any> {
     if (source === target) {
       return (input: any) => input;
@@ -220,7 +218,7 @@ export class TransformEngine {
     target: string,
     direction: TransformDirection,
     input: any,
-    onError?: (err: any) => void
+    onError?: (err: any) => void,
   ): Promise<TransformResult> {
     if (source === target) {
       return { status: 'success', data: input };
@@ -265,9 +263,10 @@ export class TransformEngine {
 
       return { status: 'success', data };
     } catch (err: any) {
-      const transformError = err instanceof TransformError
-        ? err
-        : new TransformError(err.message ?? 'Transform execution failed', 'EXECUTION_ERROR');
+      const transformError =
+        err instanceof TransformError
+          ? err
+          : new TransformError(err.message ?? 'Transform execution failed', 'EXECUTION_ERROR');
 
       onError?.(transformError);
 
@@ -290,7 +289,7 @@ export class TransformEngine {
     strategy: TransformErrorConfig | undefined,
     input: any,
     error: Error,
-    _direction: TransformDirection
+    _direction: TransformDirection,
   ): TransformResult {
     if (!strategy) {
       throw error;
@@ -298,11 +297,9 @@ export class TransformEngine {
 
     switch (strategy.strategy) {
       case 'reject':
-        throw new TransformError(
-          error.message,
-          strategy.errorCode ?? 'TRANSFORM_REJECTED',
-          { originalError: error.message }
-        );
+        throw new TransformError(error.message, strategy.errorCode ?? 'TRANSFORM_REJECTED', {
+          originalError: error.message,
+        });
 
       case 'fallback':
         if (strategy.fallback) {
@@ -310,18 +307,15 @@ export class TransformEngine {
             const fallbackResult = strategy.fallback(input);
             return { status: 'fallback', data: fallbackResult };
           } catch (fallbackErr: any) {
-            throw new TransformError(
-              `Fallback failed: ${fallbackErr.message}`,
-              'FALLBACK_FAILED',
-              { originalError: error.message, fallbackError: fallbackErr.message }
-            );
+            throw new TransformError(`Fallback failed: ${fallbackErr.message}`, 'FALLBACK_FAILED', {
+              originalError: error.message,
+              fallbackError: fallbackErr.message,
+            });
           }
         }
-        throw new TransformError(
-          error.message,
-          'FALLBACK_NOT_CONFIGURED',
-          { originalError: error.message }
-        );
+        throw new TransformError(error.message, 'FALLBACK_NOT_CONFIGURED', {
+          originalError: error.message,
+        });
 
       case 'passthrough':
         return { status: 'passthrough', data: input };
@@ -378,11 +372,7 @@ export class TransformEngine {
       }
     }
 
-    const engine = new TransformEngine(
-      Object.fromEntries(merged),
-      this.schemas,
-      this.normalizer
-    );
+    const engine = new TransformEngine(Object.fromEntries(merged), this.schemas, this.normalizer);
     engine.compiledCache = this.compiledCache;
     return engine;
   }

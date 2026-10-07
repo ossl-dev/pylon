@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { defineConfig, validateConfig } from './config.js';
 import type { PylonConfig } from './types.js';

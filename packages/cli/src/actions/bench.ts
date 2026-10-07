@@ -1,6 +1,6 @@
-import { loadPylonConfig } from '../load-config.js';
 import type { PylonConfig } from '@ossl/pylon-core';
 import { TransformEngine, VersionNormalizer } from '@ossl/pylon-core';
+import { loadPylonConfig } from '../load-config.js';
 
 /**
  * Options for the bench command.
@@ -9,7 +9,6 @@ export interface BenchOptions {
   /** Number of transform iterations to run */
   iterations: number;
 }
-
 
 /**
  * Result of a single benchmark run.
@@ -26,10 +25,17 @@ interface BenchSample {
  * transforms repeatedly to measure average, median, and p99 latency
  * as well as throughput in operations per second.
  */
-export async function benchAction(source: string, target: string, options: { iterations?: string | number }): Promise<void> {
+export async function benchAction(
+  source: string,
+  target: string,
+  options: { iterations?: string | number },
+): Promise<void> {
   const { config } = await loadPylonConfig();
 
-  const iterations = typeof options.iterations === 'number' ? options.iterations : (parseInt(options.iterations ?? '1000', 10) || 1000);
+  const iterations =
+    typeof options.iterations === 'number'
+      ? options.iterations
+      : parseInt(options.iterations ?? '1000', 10) || 1000;
 
   const normalizer = new VersionNormalizer(config.versions, config.current);
   const engine = new TransformEngine(config.transforms, config.schemas, normalizer);

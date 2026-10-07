@@ -36,10 +36,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
  * @param options - Optional endpoint override
  * @returns Express request handler middleware
  */
-export function pylonExpressShadow(
-  pylon: Pylon,
-  options?: { endpoint?: string },
-): RequestHandler {
+export function pylonExpressShadow(pylon: Pylon, options?: { endpoint?: string }): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
     // ---------------------------------------------------------------
     // 1. Normalize Express request components (same as pylonExpress)
@@ -79,12 +76,8 @@ export function pylonExpressShadow(
       })
       .then((processResult) => {
         // Log version detection results
-        console.log(
-          `[pylon:shadow] Detected version: ${processResult.version}`,
-        );
-        console.log(
-          `[pylon:shadow] Transform status: ${processResult.transformResult.status}`,
-        );
+        console.log(`[pylon:shadow] Detected version: ${processResult.version}`);
+        console.log(`[pylon:shadow] Transform status: ${processResult.transformResult.status}`);
 
         if (processResult.transformResult.status === 'error') {
           console.log(
@@ -126,7 +119,7 @@ export function pylonExpressShadow(
         };
 
         // Override res.json
-        res.json = function (body?: unknown): Response {
+        res.json = (body?: unknown): Response => {
           if (intercepted) return originalJson.call(res, body);
           intercepted = true;
           restore();
@@ -139,7 +132,7 @@ export function pylonExpressShadow(
         };
 
         // Override res.send
-        res.send = function (body?: unknown): Response {
+        res.send = (body?: unknown): Response => {
           if (intercepted) return originalSend.call(res, body);
           intercepted = true;
           restore();
@@ -154,18 +147,14 @@ export function pylonExpressShadow(
         // Override res.end — Express 5 has three overloads (callback-only,
         // chunk+callback, chunk+encoding+callback), so we use a rest
         // signature that accepts all of them.
-        res.end = function (...args: any[]): Response {
+        res.end = (...args: any[]): Response => {
           if (intercepted) return res;
           intercepted = true;
           restore();
 
           const [data] = args;
 
-          if (
-            data !== undefined &&
-            data !== null &&
-            typeof data !== 'function'
-          ) {
+          if (data !== undefined && data !== null && typeof data !== 'function') {
             console.log(
               `[pylon:shadow] Would transform response from ${pylon.current} to ${req.pylonClientVersion}`,
             );

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validateConfig } from '@ossl/pylon-core';
 import type { PylonConfig, VersionDefinition, VersionsConfig } from '@ossl/pylon-core';
+import { validateConfig } from '@ossl/pylon-core';
 
 const CONFIG_FILES = [
   'pylon.config.ts',
@@ -52,8 +52,7 @@ export async function loadPylonConfig(): Promise<LoadedConfig> {
   const configPath = await findConfig();
   if (!configPath) {
     throw new Error(
-      'No pylon.config.ts found in working directory.\n' +
-        'Run "pylon init" to create one.',
+      'No pylon.config.ts found in working directory.\n' + 'Run "pylon init" to create one.',
     );
   }
 
@@ -189,7 +188,9 @@ export function generateConfigContent(
 
   // versioning
   if (config.versioning) {
-    lines.push(`  versioning: ${JSON.stringify(config.versioning, null, 4).replace(/\n/g, '\n  ')},`);
+    lines.push(
+      `  versioning: ${JSON.stringify(config.versioning, null, 4).replace(/\n/g, '\n  ')},`,
+    );
   }
 
   // endpoints
@@ -199,7 +200,9 @@ export function generateConfigContent(
 
   // observability
   if (config.observability) {
-    lines.push(`  observability: ${JSON.stringify(config.observability, null, 4).replace(/\n/g, '\n  ')},`);
+    lines.push(
+      `  observability: ${JSON.stringify(config.observability, null, 4).replace(/\n/g, '\n  ')},`,
+    );
   }
 
   // debug

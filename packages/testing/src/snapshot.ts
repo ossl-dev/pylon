@@ -65,9 +65,7 @@ export async function snapshotVersion(
   fetcher: (request: VersionedRequest) => Promise<any>,
   options?: SnapshotOptions,
 ): Promise<SnapshotResult[]> {
-  const allVersions = pylon.normalizer
-    .listVersions()
-    .map((v) => v.name);
+  const allVersions = pylon.normalizer.listVersions().map((v) => v.name);
   const targetVersions = options?.versions
     ? allVersions.filter((v) => options.versions!.includes(v))
     : allVersions;
@@ -82,12 +80,7 @@ export async function snapshotVersion(
     const request: VersionedRequest = async (method, path, opts) => {
       let body: unknown = opts?.body;
       if (body !== undefined) {
-        const result = await pylon.transform(
-          current,
-          version,
-          'response',
-          body,
-        );
+        const result = await pylon.transform(current, version, 'response', body);
         if (result.status === 'success' && result.data !== undefined) {
           body = result.data;
         } else if (result.status === 'error') {
@@ -128,17 +121,8 @@ export async function snapshotVersion(
         responseBody = await response.text();
       }
 
-      if (
-        responseBody !== undefined &&
-        responseBody !== null &&
-        typeof responseBody === 'object'
-      ) {
-        const result = await pylon.transform(
-          version,
-          current,
-          'request',
-          responseBody,
-        );
+      if (responseBody !== undefined && responseBody !== null && typeof responseBody === 'object') {
+        const result = await pylon.transform(version, current, 'request', responseBody);
         if (result.status === 'success' && result.data !== undefined) {
           responseBody = result.data;
         }

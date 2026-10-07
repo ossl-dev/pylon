@@ -1,12 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
 import { Pylon } from '@ossl/pylon-core';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import {
-  assertContract,
-  snapshotVersion,
-  testTransform,
-  timeTravel,
-} from './index.js';
+import { assertContract, snapshotVersion, testTransform, timeTravel } from './index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,21 +135,15 @@ describe('testTransform', () => {
 
   it('throws with a useful message when the transform key is not found', async () => {
     const pylon = createTestPylon();
-    const err = await captureError(
-      testTransform(pylon, 'v9->v10', 'request', {}),
-    );
+    const err = await captureError(testTransform(pylon, 'v9->v10', 'request', {}));
     expect(err.message).toContain('transform not found for key "v9->v10"');
     expect(err.message).toContain('Available keys: v1->v2');
   });
 
   it('throws when the transform exists but the direction function is missing', async () => {
     const pylon = pylonWithPair({ request: (r: any) => r });
-    const err = await captureError(
-      testTransform(pylon, 'v1->v2', 'response', { name: 'John' }),
-    );
-    expect(err.message).toContain(
-      'transform "v1->v2" does not define a "response" function',
-    );
+    const err = await captureError(testTransform(pylon, 'v1->v2', 'response', { name: 'John' }));
+    expect(err.message).toContain('transform "v1->v2" does not define a "response" function');
   });
 });
 
@@ -178,9 +167,7 @@ describe('assertContract', () => {
         reversible: true,
         check: (transformed, original, direction) => {
           if (direction === 'request') {
-            return (
-              transformed.processed === true && transformed.name === original.name
-            );
+            return transformed.processed === true && transformed.name === original.name;
           }
           return transformed.name === original.name;
         },
@@ -280,18 +267,14 @@ describe('assertContract', () => {
   it('throws when the transform key format is invalid', async () => {
     const pylon = createTestPylon();
     for (const badKey of ['v1v2', '->v2', 'v1->', 'v1->v2->v3']) {
-      const err = await captureError(
-        assertContract(pylon, badKey, { sampleInput: {} }),
-      );
+      const err = await captureError(assertContract(pylon, badKey, { sampleInput: {} }));
       expect(err.message).toContain('Invalid transform key');
     }
   });
 
   it('throws when the transform key is valid but the transform is missing', async () => {
     const pylon = createTestPylon();
-    const err = await captureError(
-      assertContract(pylon, 'v2->v3', { sampleInput: {} }),
-    );
+    const err = await captureError(assertContract(pylon, 'v2->v3', { sampleInput: {} }));
     expect(err.message).toContain('transform not found for key "v2->v3"');
   });
 });
@@ -510,6 +493,6 @@ describe('snapshotVersion', () => {
     );
 
     expect(snapshots).toHaveLength(1);
-    expect(snapshots[0].version).toBe('v2');
+    expect(snapshots[0]?.version).toBe('v2');
   });
 });

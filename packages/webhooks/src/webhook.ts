@@ -1,6 +1,6 @@
 import type { Pylon } from '@ossl/pylon-core';
 import { RegistrationStore } from './registration-store.js';
-import type { WebhookRegistration, WebhookResult, WebhookEvent } from './types.js';
+import type { WebhookEvent, WebhookRegistration, WebhookResult } from './types.js';
 
 /**
  * Generate a unique identifier.
@@ -285,12 +285,7 @@ export class PylonWebhook {
 
     if (version !== this.pylon.current) {
       try {
-        const result = await this.pylon.transform(
-          this.pylon.current,
-          version,
-          'response',
-          payload,
-        );
+        const result = await this.pylon.transform(this.pylon.current, version, 'response', payload);
 
         if (result.status === 'success' && result.data !== undefined) {
           transformedPayload = result.data;
@@ -375,12 +370,7 @@ export class PylonWebhook {
   /**
    * Store a webhook event in the history log.
    */
-  private recordEvent(
-    event: string,
-    version: string,
-    payload: any,
-    registrationId: string,
-  ): void {
+  private recordEvent(event: string, version: string, payload: any, registrationId: string): void {
     const eventRecord: WebhookEvent = {
       id: generateId(),
       event,

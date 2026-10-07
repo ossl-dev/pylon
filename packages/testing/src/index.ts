@@ -8,8 +8,8 @@
  * - assertContract: verify transform properties (no data loss, reversibility)
  */
 
-export { timeTravel } from './time-travel.js';
-export type { VersionedRequest, TimeTravelOptions } from './time-travel.js';
-export { snapshotVersion, type SnapshotResult } from './snapshot.js';
-export { testTransform } from './test-transform.js';
 export { assertContract, type ContractAssertion } from './assert-contract.js';
+export { type SnapshotResult, snapshotVersion } from './snapshot.js';
+export { testTransform } from './test-transform.js';
+export type { TimeTravelOptions, VersionedRequest } from './time-travel.js';
+export { timeTravel } from './time-travel.js';

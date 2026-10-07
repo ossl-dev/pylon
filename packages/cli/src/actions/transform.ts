@@ -1,5 +1,5 @@
-import { loadPylonConfig } from '../load-config.js';
 import { TransformEngine, VersionNormalizer } from '@ossl/pylon-core';
+import { loadPylonConfig } from '../load-config.js';
 
 /**
  * Show a composed transform chain for a given transform key (e.g., "v1->v2").
@@ -13,9 +13,7 @@ export async function transformShowAction(key: string): Promise<void> {
   // Parse the key
   const parts = key.split('->');
   if (parts.length !== 2 || !parts[0]?.trim() || !parts[1]?.trim()) {
-    console.error(
-      'Invalid transform key format. Use "source->target" (e.g., "v1->v2").',
-    );
+    console.error('Invalid transform key format. Use "source->target" (e.g., "v1->v2").');
     process.exit(1);
   }
 
@@ -60,8 +58,12 @@ export async function transformShowAction(key: string): Promise<void> {
     const pair = config.transforms[key];
     if (pair) {
       console.log('  Transform pair:');
-      console.log(`    Request:  ${typeof pair.request === 'function' ? '✓ Defined' : 'Not defined'}`);
-      console.log(`    Response: ${typeof pair.response === 'function' ? '✓ Defined' : 'Not defined'}`);
+      console.log(
+        `    Request:  ${typeof pair.request === 'function' ? '✓ Defined' : 'Not defined'}`,
+      );
+      console.log(
+        `    Response: ${typeof pair.response === 'function' ? '✓ Defined' : 'Not defined'}`,
+      );
       if (pair.onError) {
         console.log(`    Error strategy: ${pair.onError.strategy}`);
         if (pair.onError.errorCode) {
@@ -202,9 +204,10 @@ export async function transformComposeAction(source: string, target: string): Pr
 
     const sourceOrder = normalizer.normalize(source);
     const targetOrder = normalizer.normalize(target);
-    const direction = sourceOrder !== null && targetOrder !== null && sourceOrder < targetOrder
-      ? 'upgrade (old -> new)'
-      : 'downgrade (new -> old)';
+    const direction =
+      sourceOrder !== null && targetOrder !== null && sourceOrder < targetOrder
+        ? 'upgrade (old -> new)'
+        : 'downgrade (new -> old)';
 
     console.log(`  Direction: ${direction}`);
   } catch (err: unknown) {

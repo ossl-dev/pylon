@@ -1,5 +1,5 @@
-import { loadPylonConfig } from '../load-config.js';
 import type { PylonConfig } from '@ossl/pylon-core';
+import { loadPylonConfig } from '../load-config.js';
 
 /**
  * Describes a single field in a schema.
@@ -176,10 +176,7 @@ export function compareShapes(aShape: SchemaShape, bShape: SchemaShape): Changel
  * Matches removed fields to added fields with similar names
  * (e.g., "userName" -> "username", "created_at" -> "createdAt").
  */
-export function detectRenames(
-  removed: SchemaChange[],
-  added: SchemaChange[],
-): SchemaChange[] {
+export function detectRenames(removed: SchemaChange[], added: SchemaChange[]): SchemaChange[] {
   const renames: SchemaChange[] = [];
 
   for (const rem of removed) {
@@ -203,13 +200,7 @@ export function detectRenames(
  * Simple name similarity using character overlap (Jaccard-like).
  */
 export function nameSimilarity(a: string, b: string): number {
-  const normalize = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[_-]/g, '')
-      .split('')
-      .sort()
-      .join('');
+  const normalize = (s: string) => s.toLowerCase().replace(/[_-]/g, '').split('').sort().join('');
 
   const aNorm = normalize(a);
   const bNorm = normalize(b);

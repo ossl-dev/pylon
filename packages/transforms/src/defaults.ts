@@ -21,19 +21,12 @@ import type { DefaultsOptions } from './types.js';
  * - Does not override existing truthy values
  * - Max depth option prevents infinite recursion
  */
-export function defaults<
-  T extends Record<string, any>,
-  D extends Record<string, any>,
->(
+export function defaults<T extends Record<string, any>, D extends Record<string, any>>(
   obj: T | null | undefined,
   defaultValues: D,
   options?: DefaultsOptions,
 ): T & D;
-export function defaults<T, D>(
-  obj: T,
-  defaultValues: D,
-  options?: DefaultsOptions,
-): T | D;
+export function defaults<T, D>(obj: T, defaultValues: D, options?: DefaultsOptions): T | D;
 export function defaults(
   obj: Record<string, any> | null | undefined,
   defaultValues: Record<string, any>,
@@ -72,13 +65,7 @@ function mergeDefaults(
     if (objVal === undefined || (deepFill && objVal === null)) {
       result[key] = deepClone(defaultVal);
     } else if (isObject(objVal) && isObject(defaultVal)) {
-      result[key] = mergeDefaults(
-        objVal,
-        defaultVal,
-        maxDepth,
-        depth + 1,
-        deepFill,
-      );
+      result[key] = mergeDefaults(objVal, defaultVal, maxDepth, depth + 1, deepFill);
     }
   }
 

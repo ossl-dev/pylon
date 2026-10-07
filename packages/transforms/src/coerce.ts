@@ -12,11 +12,7 @@
  * coerce.toDate(val)
  * coerce.toArray(val)
  */
-export function coerce<
-  T extends Record<string, any>,
-  K extends keyof T,
-  R,
->(
+export function coerce<T extends Record<string, any>, K extends keyof T, R>(
   obj: T | null | undefined,
   key: K,
   fn: (value: T[K]) => R,
@@ -42,6 +38,7 @@ export namespace coerce {
    * Coerce a value to string.
    * null/undefined become empty string.
    */
+  // biome-ignore lint/suspicious/noShadowRestrictedNames: public coercion API
   export function toString(val: unknown): string {
     if (val == null) return '';
     return String(val);

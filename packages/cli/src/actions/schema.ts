@@ -1,5 +1,5 @@
-import { loadPylonConfig } from '../load-config.js';
 import { validateConfig } from '@ossl/pylon-core';
+import { loadPylonConfig } from '../load-config.js';
 
 /**
  * Show the schema for a given version.
@@ -42,12 +42,8 @@ export async function schemaDiffAction(a: string, b: string): Promise<void> {
 
   const schemaKeys = Object.keys(config.schemas);
 
-  const keyA = schemaKeys.find(
-    (k) => k === a || k.startsWith(a) || a.startsWith(k),
-  );
-  const keyB = schemaKeys.find(
-    (k) => k === b || k.startsWith(b) || b.startsWith(k),
-  );
+  const keyA = schemaKeys.find((k) => k === a || k.startsWith(a) || a.startsWith(k));
+  const keyB = schemaKeys.find((k) => k === b || k.startsWith(b) || b.startsWith(k));
 
   if (!keyA) {
     console.log(`No schema found for version "${a}".`);
@@ -120,9 +116,7 @@ export async function schemaValidateAction(version: string): Promise<void> {
 
   // Check transforms involving this version
   const transformKeys = Object.keys(config.transforms);
-  const relevantTransforms = transformKeys.filter(
-    (k) => k.includes(version),
-  );
+  const relevantTransforms = transformKeys.filter((k) => k.includes(version));
 
   if (relevantTransforms.length > 0) {
     console.log('');

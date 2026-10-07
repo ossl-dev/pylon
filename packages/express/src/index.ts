@@ -68,10 +68,7 @@ export interface PylonExpressOptions {
  * @param options - Optional endpoint or shadow configuration
  * @returns Express request handler middleware
  */
-export function pylonExpress(
-  pylon: Pylon,
-  options?: PylonExpressOptions,
-): RequestHandler {
+export function pylonExpress(pylon: Pylon, options?: PylonExpressOptions): RequestHandler {
   const isShadow = options?.shadow ?? false;
 
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -148,10 +145,7 @@ export function pylonExpress(
          * original method. Only the first call is honoured; subsequent
          * calls are passed through directly.
          */
-        const sendTransformed = (
-          body: unknown,
-          sendOriginal: (b: unknown) => Response,
-        ): void => {
+        const sendTransformed = (body: unknown, sendOriginal: (b: unknown) => Response): void => {
           if (intercepted) return;
           intercepted = true;
 
@@ -172,9 +166,7 @@ export function pylonExpress(
             .then((responseResult) => {
               // Set Pylon version/transform headers
               if (!res.headersSent) {
-                for (const [headerKey, headerValue] of Object.entries(
-                  responseResult.headers,
-                )) {
+                for (const [headerKey, headerValue] of Object.entries(responseResult.headers)) {
                   res.set(headerKey, headerValue);
                 }
               }
@@ -202,7 +194,7 @@ export function pylonExpress(
         };
 
         // Override res.json
-        res.json = function (body?: unknown): Response {
+        res.json = (body?: unknown): Response => {
           if (!intercepted) {
             sendTransformed(body, (b) => originalJson.call(res, b));
           }
@@ -210,7 +202,7 @@ export function pylonExpress(
         };
 
         // Override res.send
-        res.send = function (body?: unknown): Response {
+        res.send = (body?: unknown): Response => {
           if (!intercepted) {
             sendTransformed(body, (b) => originalSend.call(res, b));
           }
@@ -220,16 +212,14 @@ export function pylonExpress(
         // Override res.end — Express 5 has three overloads (callback-only,
         // chunk+callback, chunk+encoding+callback), so we use a rest
         // signature that accepts all of them.
-        res.end = function (...args: any[]): Response {
+        res.end = (...args: any[]): Response => {
           if (!intercepted) {
             const [data] = args;
 
             // Only intercept when a non-trivial body is provided;
             // skip for callbacks and bare end() calls.
             const shouldIntercept =
-              data !== undefined &&
-              data !== null &&
-              typeof data !== 'function';
+              data !== undefined && data !== null && typeof data !== 'function';
 
             if (shouldIntercept) {
               sendTransformed(data, (b) => {

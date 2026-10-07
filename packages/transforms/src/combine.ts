@@ -9,16 +9,9 @@
  * combine('', null)               // => ''
  * combine()                        // => ''
  */
-export function combine(
-  ...values: (string | null | undefined)[]
-): string;
-export function combine(
-  delimiter: string,
-  ...values: (string | null | undefined)[]
-): string;
-export function combine(
-  ...args: (string | null | undefined)[]
-): string {
+export function combine(...values: (string | null | undefined)[]): string;
+export function combine(delimiter: string, ...values: (string | null | undefined)[]): string;
+export function combine(...args: (string | null | undefined)[]): string {
   if (args.length === 0) return '';
 
   let delimiter = ' ';

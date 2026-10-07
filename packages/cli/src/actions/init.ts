@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve, extname } from 'node:path';
-import { writeConfig } from '../load-config.js';
+import { extname, join, resolve } from 'node:path';
 import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
+import { writeConfig } from '../load-config.js';
 
 /**
  * Regex patterns used to detect versioning-related code in source files.
@@ -10,9 +10,9 @@ const VERSION_PATTERNS = [
   /version\s*['"](\d+\.\d+\.\d+)['"]/g,
   /api['"]?\s*:\s*['"]v?(\d+)['"]/gi,
   /['"]v?(\d+)['"]\s*[:\]]/g,
-  /accept-version/i,
-  /api-version/i,
-  /x-api-version/i,
+  /accept-version/gi,
+  /api-version/gi,
+  /x-api-version/gi,
 ];
 
 /**
@@ -22,7 +22,10 @@ const VERSION_PATTERNS = [
  * patterns in source files. If --preset is provided, a preset configuration
  * is generated. Otherwise the user is prompted for configuration choices.
  */
-export async function initAction(options: { preset?: string; fromExisting?: string }): Promise<void> {
+export async function initAction(options: {
+  preset?: string;
+  fromExisting?: string;
+}): Promise<void> {
   const cwd = process.cwd();
   const configPath = join(cwd, 'pylon.config.ts');
 
@@ -122,8 +125,7 @@ export function scanForVersions(dir: string): string[] {
               const content = readFileSync(fullPath, 'utf-8');
               for (const pattern of VERSION_PATTERNS) {
                 pattern.lastIndex = 0;
-                let match: RegExpExecArray | null;
-                while ((match = pattern.exec(content)) !== null) {
+                for (const match of content.matchAll(pattern)) {
                   if (match[1]) {
                     versions.push(match[1]);
                   }
@@ -224,13 +226,15 @@ async function interactiveInit(): Promise<PylonConfig> {
   const currentVersion = current || 'v1';
 
   const formatTypes = ['semantic', 'numeric', 'date-monthly', 'date-daily'];
-  const formatStr = await ask(
-    `Version format (${formatTypes.join(', ')}) [semantic]: `,
-  );
-  const format = (formatStr || 'semantic') as 'semantic' | 'numeric' | 'date-monthly' | 'date-daily';
+  const formatStr = await ask(`Version format (${formatTypes.join(', ')}) [semantic]: `);
+  const format = (formatStr || 'semantic') as
+    | 'semantic'
+    | 'numeric'
+    | 'date-monthly'
+    | 'date-daily';
 
   const prefixStr = await ask('Version prefix (e.g. "v") [v]: ');
-  const prefix = format === 'semantic' ? (prefixStr || 'v') : undefined;
+  const prefix = format === 'semantic' ? prefixStr || 'v' : undefined;
 
   // Parse number of schemas (currently unused, reserved for future)
   await ask('Number of schemas (endpoints) to define [0]: ');

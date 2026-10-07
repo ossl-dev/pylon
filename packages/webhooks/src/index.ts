@@ -1,9 +1,9 @@
-export { PylonWebhook } from './webhook.js';
 export { RegistrationStore } from './registration-store.js';
 export type {
-  WebhookRegistration,
-  WebhookSendOptions,
-  WebhookResult,
-  WebhookEvent,
   ReplayOptions,
+  WebhookEvent,
+  WebhookRegistration,
+  WebhookResult,
+  WebhookSendOptions,
 } from './types.js';
+export { PylonWebhook } from './webhook.js';

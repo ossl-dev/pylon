@@ -88,15 +88,10 @@ export interface TimeTravelOptions {
  */
 export async function timeTravel(
   pylon: Pylon,
-  callback: (
-    version: string,
-    request: VersionedRequest,
-  ) => Promise<void>,
+  callback: (version: string, request: VersionedRequest) => Promise<void>,
   options?: TimeTravelOptions,
 ): Promise<void> {
-  const allVersions = pylon.normalizer
-    .listVersions()
-    .map((v) => v.name);
+  const allVersions = pylon.normalizer.listVersions().map((v) => v.name);
   const targetVersions = options?.versions
     ? allVersions.filter((v) => options.versions!.includes(v))
     : allVersions;
@@ -111,12 +106,7 @@ export async function timeTravel(
       //    the target-version format.
       let body: unknown = opts?.body;
       if (body !== undefined) {
-        const result = await pylon.transform(
-          current,
-          version,
-          'response',
-          body,
-        );
+        const result = await pylon.transform(current, version, 'response', body);
         if (result.status === 'success' && result.data !== undefined) {
           body = result.data;
         } else if (result.status === 'error') {
@@ -164,17 +154,8 @@ export async function timeTravel(
 
       // 7. Upgrade the response body back to current-version format
       //    so all assertions use the same schema.
-      if (
-        responseBody !== undefined &&
-        responseBody !== null &&
-        typeof responseBody === 'object'
-      ) {
-        const result = await pylon.transform(
-          version,
-          current,
-          'request',
-          responseBody,
-        );
+      if (responseBody !== undefined && responseBody !== null && typeof responseBody === 'object') {
+        const result = await pylon.transform(version, current, 'request', responseBody);
         if (result.status === 'success' && result.data !== undefined) {
           responseBody = result.data;
         }

@@ -1,5 +1,5 @@
-import type { Pylon, DebugInfo } from '@ossl/pylon-core';
-import type { Middleware, ParameterizedContext, DefaultState, DefaultContext } from 'koa';
+import type { DebugInfo, Pylon } from '@ossl/pylon-core';
+import type { DefaultContext, DefaultState, Middleware, ParameterizedContext } from 'koa';
 
 export interface PylonKoaOptions {
   /** Override endpoint name for per-endpoint config */
@@ -40,7 +40,10 @@ declare module 'koa' {
  * 3. Set version headers on response
  */
 export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
-  return async (ctx: ParameterizedContext<DefaultState, DefaultContext>, next: () => Promise<unknown>) => {
+  return async (
+    ctx: ParameterizedContext<DefaultState, DefaultContext>,
+    next: () => Promise<unknown>,
+  ) => {
     // 1. Extract request data
     const headers = extractHeaders(ctx);
     const query = extractQuery(ctx);
@@ -103,9 +106,7 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
         // Koa ctx.body can be string, Buffer, stream, or object.
         // We only attempt to transform JSON-serializable objects (most common for APIs).
         const responseBodyStr =
-          typeof ctx.body === 'object'
-            ? JSON.stringify(ctx.body)
-            : String(ctx.body);
+          typeof ctx.body === 'object' ? JSON.stringify(ctx.body) : String(ctx.body);
 
         let responseBody: unknown;
         try {
@@ -146,7 +147,9 @@ export function pylonKoaShadow(pylon: Pylon, options?: PylonKoaOptions): Middlew
   return pylonKoa(pylon, { ...options, shadow: true });
 }
 
-function extractHeaders(ctx: ParameterizedContext<DefaultState, DefaultContext>): Record<string, string> {
+function extractHeaders(
+  ctx: ParameterizedContext<DefaultState, DefaultContext>,
+): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(ctx.headers)) {
     if (value !== undefined) {
@@ -156,7 +159,9 @@ function extractHeaders(ctx: ParameterizedContext<DefaultState, DefaultContext>)
   return headers;
 }
 
-function extractQuery(ctx: ParameterizedContext<DefaultState, DefaultContext>): Record<string, string> {
+function extractQuery(
+  ctx: ParameterizedContext<DefaultState, DefaultContext>,
+): Record<string, string> {
   const query: Record<string, string> = {};
   for (const [key, value] of Object.entries(ctx.query)) {
     if (value !== undefined) {
@@ -166,7 +171,10 @@ function extractQuery(ctx: ParameterizedContext<DefaultState, DefaultContext>): 
   return query;
 }
 
-function setHeaders(ctx: ParameterizedContext<DefaultState, DefaultContext>, headers: Record<string, string>): void {
+function setHeaders(
+  ctx: ParameterizedContext<DefaultState, DefaultContext>,
+  headers: Record<string, string>,
+): void {
   for (const [key, value] of Object.entries(headers)) {
     if (value !== undefined && value !== null) {
       ctx.set(key, value);

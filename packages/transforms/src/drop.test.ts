@@ -1,20 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { drop } from './drop.js';
 
 describe('drop', () => {
   it('removes specified keys', () => {
-    const result = drop(
-      { name: 'John', email: 'john@test.com', ssn: '123-45-6789' },
-      ['ssn'],
-    );
+    const result = drop({ name: 'John', email: 'john@test.com', ssn: '123-45-6789' }, ['ssn']);
     expect(result).toEqual({ name: 'John', email: 'john@test.com' });
   });
 
   it('removes multiple keys', () => {
-    const result = drop(
-      { name: 'John', email: 'john@test.com', age: 30, ssn: '123-45-6789' },
-      ['ssn', 'age'],
-    );
+    const result = drop({ name: 'John', email: 'john@test.com', age: 30, ssn: '123-45-6789' }, [
+      'ssn',
+      'age',
+    ]);
     expect(result).toEqual({ name: 'John', email: 'john@test.com' });
   });
 

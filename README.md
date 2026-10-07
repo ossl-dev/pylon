@@ -284,9 +284,9 @@ Three pillars:
 
 ## Requirements
 
-* Node.js 20+
-* Bun 1.2+
-* TypeScript 5.5+
+* Node.js 20+ (22.12+ for the CLI)
+* Bun 1.3.14+ for development
+* TypeScript 6 for development
 
 ---
 

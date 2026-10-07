@@ -36,3 +36,5 @@ coverage/
 # Temp
 tmp/
 temp/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

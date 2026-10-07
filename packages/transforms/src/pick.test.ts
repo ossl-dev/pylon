@@ -1,12 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { pick } from './pick.js';
 
 describe('pick', () => {
   it('keeps only specified keys', () => {
-    const result = pick(
-      { name: 'John', email: 'john@test.com', age: 30 },
-      ['name', 'email'],
-    );
+    const result = pick({ name: 'John', email: 'john@test.com', age: 30 }, ['name', 'email']);
     expect(result).toEqual({ name: 'John', email: 'john@test.com' });
   });
 

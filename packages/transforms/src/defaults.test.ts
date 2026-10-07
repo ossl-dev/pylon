@@ -1,12 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { defaults } from './defaults.js';
 
 describe('defaults', () => {
   it('deep merges defaults into an object', () => {
-    const result = defaults(
-      { name: 'John' },
-      { email: 'unknown@example.com', age: 25 },
-    );
+    const result = defaults({ name: 'John' }, { email: 'unknown@example.com', age: 25 });
     expect(result).toEqual({ name: 'John', email: 'unknown@example.com', age: 25 });
   });
 
@@ -19,10 +16,7 @@ describe('defaults', () => {
   });
 
   it('fills undefined fields', () => {
-    const result = defaults(
-      { name: 'John', email: undefined },
-      { email: 'default@test.com' },
-    );
+    const result = defaults({ name: 'John', email: undefined }, { email: 'default@test.com' });
     expect(result).toEqual({ name: 'John', email: 'default@test.com' });
   });
 
@@ -36,26 +30,17 @@ describe('defaults', () => {
   });
 
   it('does not fill null fields without deepFill option', () => {
-    const result = defaults(
-      { name: 'John', email: null },
-      { email: 'default@test.com' },
-    );
+    const result = defaults({ name: 'John', email: null }, { email: 'default@test.com' });
     expect(result).toEqual({ name: 'John', email: null });
   });
 
   it('nested object merging', () => {
-    const result = defaults(
-      { address: { street: '123 Main' } },
-      { address: { country: 'US' } },
-    );
+    const result = defaults({ address: { street: '123 Main' } }, { address: { country: 'US' } });
     expect(result).toEqual({ address: { street: '123 Main', country: 'US' } });
   });
 
   it('replaces arrays entirely (does not merge)', () => {
-    const result = defaults(
-      { tags: ['a', 'b'] },
-      { tags: ['x', 'y', 'z'] },
-    );
+    const result = defaults({ tags: ['a', 'b'] }, { tags: ['x', 'y', 'z'] });
     expect(result).toEqual({ tags: ['a', 'b'] });
   });
 
@@ -76,11 +61,7 @@ describe('defaults', () => {
   });
 
   it('respects max depth option', () => {
-    const result = defaults(
-      { a: { b: { c: 1 } } },
-      { a: { b: { d: 2 } } },
-      { maxDepth: 2 },
-    );
+    const result = defaults({ a: { b: { c: 1 } } }, { a: { b: { d: 2 } } }, { maxDepth: 2 });
     expect(result).toEqual({ a: { b: { c: 1 } } });
   });
 
@@ -111,10 +92,7 @@ describe('defaults', () => {
   });
 
   it('does not append array elements from defaults', () => {
-    const result = defaults(
-      { items: [1, 2, 3] },
-      { items: [4, 5] },
-    );
+    const result = defaults({ items: [1, 2, 3] }, { items: [4, 5] });
     expect(result).toEqual({ items: [1, 2, 3] });
   });
 });

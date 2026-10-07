@@ -7,10 +7,7 @@
  *
  * Only includes keys that actually exist on the source object.
  */
-export function nest<
-  T extends Record<string, any>,
-  K extends keyof T,
->(
+export function nest<T extends Record<string, any>, K extends keyof T>(
   obj: T | null | undefined,
   keys: K[],
   newKey: string,

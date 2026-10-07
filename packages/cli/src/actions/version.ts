@@ -1,5 +1,5 @@
-import { loadPylonConfig, writeConfig } from '../load-config.js';
 import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
+import { loadPylonConfig, writeConfig } from '../load-config.js';
 
 /**
  * Ensure the config has an explicit versions array.
@@ -201,9 +201,7 @@ export async function versionUnpublishAction(name: string): Promise<void> {
         versions,
       };
       await writeConfig(configPath, updatedConfig);
-      console.log(
-        `Unpublished version "${name}". Current version is now "${fallback.name}".`,
-      );
+      console.log(`Unpublished version "${name}". Current version is now "${fallback.name}".`);
       return;
     }
   }
@@ -265,9 +263,7 @@ export async function versionRetireAction(name: string): Promise<void> {
   await writeConfig(configPath, updatedConfig);
 
   if (config.current === name) {
-    console.log(
-      `Retired version "${name}". Current version is now "${updatedConfig.current}".`,
-    );
+    console.log(`Retired version "${name}". Current version is now "${updatedConfig.current}".`);
   } else {
     console.log(`Retired version "${name}".`);
   }

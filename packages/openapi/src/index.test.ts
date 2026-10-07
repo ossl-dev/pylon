@@ -1,11 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
 import { Pylon } from '@ossl/pylon-core';
-import {
-  generateOpenAPI,
-  zodToOpenAPISchema,
-  inferPathsFromSchemas,
-} from './index.js';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { generateOpenAPI, inferPathsFromSchemas, zodToOpenAPISchema } from './index.js';
 
 // ============================================================
 // zodToOpenAPISchema
@@ -39,7 +35,7 @@ describe('zodToOpenAPISchema', () => {
 
     const result = zodToOpenAPISchema(schema);
 
-    expect(result.properties!.user.type).toBe('object');
+    expect(result.properties?.user?.type).toBe('object');
     expect((result.properties!.user as any).properties.name).toEqual({ type: 'string' });
   });
 
@@ -124,8 +120,8 @@ describe('zodToOpenAPISchema', () => {
     const result = zodToOpenAPISchema(z.union([z.string(), z.number()]));
 
     expect(result.oneOf).toHaveLength(2);
-    expect(result.oneOf![0].type).toBe('string');
-    expect(result.oneOf![1].type).toBe('number');
+    expect(result.oneOf?.[0]?.type).toBe('string');
+    expect(result.oneOf?.[1]?.type).toBe('number');
   });
 
   it('converts ZodIntersection to allOf', () => {
@@ -134,8 +130,8 @@ describe('zodToOpenAPISchema', () => {
     );
 
     expect(result.allOf).toHaveLength(2);
-    expect(result.allOf![0].type).toBe('object');
-    expect(result.allOf![1].type).toBe('object');
+    expect(result.allOf?.[0]?.type).toBe('object');
+    expect(result.allOf?.[1]?.type).toBe('object');
   });
 
   it('converts ZodOptional by unwrapping inner type', () => {
@@ -207,7 +203,7 @@ describe('zodToOpenAPISchema', () => {
 
     // Nullable property is NOT optional — it's still required but can be null
     expect(result.required).toContain('name');
-    expect(result.properties!.name.nullable).toBe(true);
+    expect(result.properties?.name?.nullable).toBe(true);
   });
 });
 
@@ -249,25 +245,20 @@ describe('inferPathsFromSchemas', () => {
     const paths = inferPathsFromSchemas(schemas, versions, normalizer);
 
     const getResponse =
-      paths['/v1/users'].get!.responses['200'].content!['application/json']
-        .schema;
-    expect(getResponse.$ref).toBe('#/components/schemas/v1_request');
+      paths['/v1/users']?.get?.responses['200']?.content?.['application/json']?.schema;
+    expect(getResponse?.$ref).toBe('#/components/schemas/v1_request');
   });
 
   it('sanitizes version in operationId', () => {
     const schemas = { '2024-03-15': z.object({ name: z.string() }) };
     const versions = ['2024-03-15'];
     const normalizer = {
-      listVersions: () => [
-        { name: '2024-03-15', order: 1, deprecated: false },
-      ],
+      listVersions: () => [{ name: '2024-03-15', order: 1, deprecated: false }],
     };
 
     const paths = inferPathsFromSchemas(schemas, versions, normalizer);
 
-    expect(paths['/2024-03-15/users'].get!.operationId).toBe(
-      'listUsers_2024_03_15',
-    );
+    expect(paths['/2024-03-15/users']?.get?.operationId).toBe('listUsers_2024_03_15');
   });
 
   it('marks deprecated versions', () => {
@@ -279,8 +270,8 @@ describe('inferPathsFromSchemas', () => {
 
     const paths = inferPathsFromSchemas(schemas, versions, normalizer);
 
-    expect(paths['/v1/users'].get!.deprecated).toBe(true);
-    expect(paths['/v1/users'].post!.deprecated).toBe(true);
+    expect(paths['/v1/users']?.get?.deprecated).toBe(true);
+    expect(paths['/v1/users']?.post?.deprecated).toBe(true);
   });
 
   it('does not mark non-deprecated versions', () => {
@@ -292,7 +283,7 @@ describe('inferPathsFromSchemas', () => {
 
     const paths = inferPathsFromSchemas(schemas, versions, normalizer);
 
-    expect(paths['/v1/users'].get!.deprecated).toBeUndefined();
+    expect(paths['/v1/users']?.get?.deprecated).toBeUndefined();
   });
 
   it('skips versions missing from schemas', () => {
@@ -321,11 +312,11 @@ describe('inferPathsFromSchemas', () => {
 
     const paths = inferPathsFromSchemas(schemas, versions, normalizer);
 
-    const params = paths['/v1/users'].get!.parameters!;
-    expect(params[0].name).toBe('X-API-Version');
-    expect(params[0].in).toBe('header');
-    expect(params[0].required).toBe(true);
-    expect(params[0].schema.default).toBe('v1');
+    const params = paths['/v1/users']?.get?.parameters;
+    expect(params?.[0]?.name).toBe('X-API-Version');
+    expect(params?.[0]?.in).toBe('header');
+    expect(params?.[0]?.required).toBe(true);
+    expect(params?.[0]?.schema.default).toBe('v1');
   });
 });
 
@@ -399,7 +390,7 @@ describe('generateOpenAPI', () => {
     });
 
     expect(spec.servers).toHaveLength(1);
-    expect(spec.servers![0].url).toBe('https://api.example.com');
+    expect(spec.servers?.[0]?.url).toBe('https://api.example.com');
   });
 
   it('includes security schemes when provided', () => {
@@ -480,8 +471,7 @@ describe('generateOpenAPI', () => {
 
     const spec = generateOpenAPI(pylon);
 
-    const themeSchema =
-      spec.components!.schemas!['v1_request'].properties!.theme;
+    const themeSchema = spec.components!.schemas!['v1_request'].properties!.theme;
     expect(themeSchema.default).toBe('light');
   });
 });

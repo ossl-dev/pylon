@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { map } from './map.js';
 
 describe('map', () => {
@@ -26,10 +26,8 @@ describe('map', () => {
   });
 
   it('preserves other keys when transforming', () => {
-    const result = map(
-      { name: 'john', age: '30', email: 'john@test.com' },
-      'age',
-      (val: string) => parseInt(val, 10),
+    const result = map({ name: 'john', age: '30', email: 'john@test.com' }, 'age', (val: string) =>
+      parseInt(val, 10),
     );
     expect(result).toEqual({ name: 'john', age: 30, email: 'john@test.com' });
   });

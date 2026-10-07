@@ -1,5 +1,5 @@
-import { loadPylonConfig } from '../load-config.js';
 import type { PylonConfig } from '@ossl/pylon-core';
+import { loadPylonConfig } from '../load-config.js';
 
 /**
  * Generate an OpenAPI specification from the current config.
@@ -80,9 +80,7 @@ export async function generateChangelogAction(range: string): Promise<void> {
   const target = parts[1]?.trim();
 
   if (!source || !target) {
-    console.error(
-      'Invalid range format. Use "source..target" (e.g., "v1..v2").',
-    );
+    console.error('Invalid range format. Use "source..target" (e.g., "v1..v2").');
     process.exit(1);
   }
 
@@ -104,11 +102,7 @@ export async function generateChangelogAction(range: string): Promise<void> {
  * Currently produces a template changelog. Full implementation
  * will compare schemas, transforms, and endpoint definitions.
  */
-export function buildChangelog(
-  source: string,
-  target: string,
-  config: PylonConfig,
-): string {
+export function buildChangelog(source: string, target: string, config: PylonConfig): string {
   const lines: string[] = [];
 
   // Check if there are schemas defined
@@ -147,9 +141,7 @@ export function buildChangelog(
 
   lines.push('---');
   lines.push('');
-  lines.push(
-    '_This changelog was auto generated. Review and update it with manual entries._',
-  );
+  lines.push('_This changelog was auto generated. Review and update it with manual entries._');
   lines.push('');
 
   return lines.join('\n');

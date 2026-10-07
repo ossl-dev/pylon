@@ -1,12 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { VersionNormalizer } from './version-normalizer.js';
+import { describe, expect, it } from 'vitest';
 import { TransformEngine } from './transform-engine.js';
+import { VersionNormalizer } from './version-normalizer.js';
 
 function createEngine() {
-  const normalizer = new VersionNormalizer(
-    { format: 'semantic' },
-    'v4',
-  );
+  const normalizer = new VersionNormalizer({ format: 'semantic' }, 'v4');
   const engine = new TransformEngine(
     {
       'v1->v2': {
@@ -226,9 +223,7 @@ describe('TransformEngine', () => {
         {},
         normalizer,
       );
-      await expect(
-        engine.execute('v1', 'v4', 'request', { name: 'John' }),
-      ).rejects.toThrow();
+      await expect(engine.execute('v1', 'v4', 'request', { name: 'John' })).rejects.toThrow();
     });
 
     it('circular dependency detection', () => {
@@ -265,9 +260,7 @@ describe('TransformEngine', () => {
         normalizer,
       );
       const errors: any[] = [];
-      await engine.execute('v1', 'v2', 'request', { name: 'John' }, (err) =>
-        errors.push(err),
-      );
+      await engine.execute('v1', 'v2', 'request', { name: 'John' }, (err) => errors.push(err));
       expect(errors.length).toBeGreaterThan(0);
     });
 

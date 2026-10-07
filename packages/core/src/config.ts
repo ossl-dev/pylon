@@ -87,7 +87,9 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
           errors.push(`Transform "${key}" has invalid error strategy: "${pair.onError.strategy}"`);
         }
         if (pair.onError.strategy === 'fallback' && typeof pair.onError.fallback !== 'function') {
-          errors.push(`Transform "${key}" uses "fallback" strategy but no fallback function provided`);
+          errors.push(
+            `Transform "${key}" uses "fallback" strategy but no fallback function provided`,
+          );
         }
       }
     }
@@ -100,7 +102,7 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
     const transformMap = config.transforms ?? {};
 
     for (const key of transformKeys) {
-      const rawParts = key.split('->').map(s => s.trim());
+      const rawParts = key.split('->').map((s) => s.trim());
       const src = rawParts[0];
       const tgt = rawParts[1];
       if (!src || !tgt) continue;
@@ -135,7 +137,9 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
       };
       for (const node of referenced) {
         if (hasCycle(node)) {
-          errors.push(`Circular dependency detected in transform graph involving version "${node}"`);
+          errors.push(
+            `Circular dependency detected in transform graph involving version "${node}"`,
+          );
           break;
         }
       }
@@ -153,7 +157,9 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
       for (const source of config.versioning.sources) {
         const validTypes = ['header', 'path', 'query', 'body'];
         if (!validTypes.includes(source.type)) {
-          errors.push(`Invalid version source type: "${source.type}". Expected one of: ${validTypes.join(', ')}`);
+          errors.push(
+            `Invalid version source type: "${source.type}". Expected one of: ${validTypes.join(', ')}`,
+          );
         }
       }
     }
@@ -168,7 +174,11 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
     for (const [name, endpoint] of Object.entries(config.endpoints)) {
       if (endpoint.schemas) {
         for (const [key, schema] of Object.entries(endpoint.schemas)) {
-          if (!schema || typeof schema !== 'object' || typeof (schema as any).parse !== 'function') {
+          if (
+            !schema ||
+            typeof schema !== 'object' ||
+            typeof (schema as any).parse !== 'function'
+          ) {
             errors.push(`Endpoint "${name}" schema "${key}" is not a valid Zod schema`);
           }
         }

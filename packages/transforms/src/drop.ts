@@ -8,10 +8,10 @@
  *
  * Handles: non-existent keys (silently ignored), null/undefined input (returns {})
  */
-export function drop<
-  T extends Record<string, any>,
-  K extends keyof T,
->(obj: T | null | undefined, keys: K[]): Omit<T, K>;
+export function drop<T extends Record<string, any>, K extends keyof T>(
+  obj: T | null | undefined,
+  keys: K[],
+): Omit<T, K>;
 export function drop(
   obj: Record<string, any> | null | undefined,
   keys: string[],

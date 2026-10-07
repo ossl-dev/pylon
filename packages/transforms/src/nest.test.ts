@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { nest } from './nest.js';
 
 describe('nest', () => {
@@ -46,11 +46,7 @@ describe('nest', () => {
   });
 
   it('does not create nested key when no keys are nested', () => {
-    const result = nest(
-      { name: 'John' },
-      ['street', 'city'],
-      'address',
-    );
+    const result = nest({ name: 'John' }, ['street', 'city'], 'address');
     expect(result).toEqual({ name: 'John' });
   });
 

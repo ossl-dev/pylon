@@ -1,6 +1,5 @@
-import type { Pylon } from '@ossl/pylon-core';
-import type { DebugInfo } from '@ossl/pylon-core';
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { DebugInfo, Pylon } from '@ossl/pylon-core';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 export interface PylonFastifyOptions {
   /** Override endpoint name for per-endpoint config. */
@@ -103,38 +102,41 @@ export function pylonFastify(
   // ── onSend ─────────────────────────────────────────────────────
   // Before the payload is serialised, reverse the version transform
   // so the client receives data in the shape they requested.
-  fastify.addHook('onSend', async (request: FastifyRequest, reply: FastifyReply, payload: unknown) => {
-    const meta = metaMap.get(request);
-    if (!meta || meta.pylonError) {
-      return;
-    }
-
-    // Only intercept serialised JSON payloads.
-    if (typeof payload !== 'string') {
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(payload) as unknown;
-
-      const result = await pylon.processResponse(
-        meta.clientVersion,
-        parsed,
-        {},
-        meta.transformsApplied,
-        meta.debug,
-      );
-
-      for (const [key, value] of Object.entries(result.headers)) {
-        void reply.header(key, value);
+  fastify.addHook(
+    'onSend',
+    async (request: FastifyRequest, reply: FastifyReply, payload: unknown) => {
+      const meta = metaMap.get(request);
+      if (!meta || meta.pylonError) {
+        return;
       }
 
-      return JSON.stringify(result.body);
-    } catch {
-      // Graceful degradation: send the current-version payload.
-      return payload;
-    }
-  });
+      // Only intercept serialised JSON payloads.
+      if (typeof payload !== 'string') {
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(payload) as unknown;
+
+        const result = await pylon.processResponse(
+          meta.clientVersion,
+          parsed,
+          {},
+          meta.transformsApplied,
+          meta.debug,
+        );
+
+        for (const [key, value] of Object.entries(result.headers)) {
+          void reply.header(key, value);
+        }
+
+        return JSON.stringify(result.body);
+      } catch {
+        // Graceful degradation: send the current-version payload.
+        return payload;
+      }
+    },
+  );
 
   // ── onResponse ────────────────────────────────────────────────
   // Tear down per-request metadata once the response has been sent.

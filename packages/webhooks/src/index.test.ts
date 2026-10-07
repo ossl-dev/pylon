@@ -1,19 +1,15 @@
+import type { Pylon, TransformResult } from '@ossl/pylon-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Pylon } from '@ossl/pylon-core';
-import { PylonWebhook, RegistrationStore } from './index.js';
 import type { WebhookRegistration } from './index.js';
+import { PylonWebhook, RegistrationStore } from './index.js';
 
 const URL_A = 'https://example.com/hooks/a';
 const URL_B = 'https://example.com/hooks/b';
 
-const transformMock = vi.fn<
-  (
-    source: string,
-    target: string,
-    direction: string,
-    data: any,
-  ) => Promise<{ status: 'success'; data: any }>
->();
+const transformMock =
+  vi.fn<
+    (source: string, target: string, direction: string, data: any) => Promise<TransformResult>
+  >();
 
 transformMock.mockImplementation(async (source, target, _direction, data) => ({
   status: 'success' as const,
@@ -124,7 +120,9 @@ describe('send', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([URL_A, URL_B]);
     expect(fetchMock.mock.calls.every((call) => call[1].method === 'POST')).toBe(true);
-    expect(fetchMock.mock.calls.every((call) => call[1].headers['X-Webhook-Event'] === 'user.created')).toBe(true);
+    expect(
+      fetchMock.mock.calls.every((call) => call[1].headers['X-Webhook-Event'] === 'user.created'),
+    ).toBe(true);
   });
 
   it('transforms the payload for non-current versions', async () => {
@@ -159,10 +157,10 @@ describe('send', () => {
 
     const history = webhooks.getHistory();
     expect(history).toHaveLength(1);
-    expect(history[0].event).toBe('user.created');
-    expect(history[0].version).toBe('v1');
-    expect(history[0].payload).toEqual({ ...payload, transformed: true, from: 'v2', to: 'v1' });
-    expect(webhooks.getHistory(history[0].id)).toEqual([history[0]]);
+    expect(history[0]?.event).toBe('user.created');
+    expect(history[0]?.version).toBe('v1');
+    expect(history[0]?.payload).toEqual({ ...payload, transformed: true, from: 'v2', to: 'v1' });
+    expect(webhooks.getHistory(history[0]?.id)).toEqual([history[0]]);
     expect(webhooks.getHistory('missing')).toEqual([]);
   });
 
@@ -173,10 +171,10 @@ describe('send', () => {
     const results = await webhooks.send({ event: 'user.created', payload: { name: 'Ada' } });
 
     expect(results).toHaveLength(1);
-    expect(results[0].status).toBe(0);
-    expect(typeof results[0].idempotencyKey).toBe('string');
-    expect(results[0].timestamp).toBeInstanceOf(Date);
-    expect(results[0].durationMs).toBeGreaterThanOrEqual(0);
+    expect(results[0]?.status).toBe(0);
+    expect(typeof results[0]?.idempotencyKey).toBe('string');
+    expect(results[0]?.timestamp).toBeInstanceOf(Date);
+    expect(results[0]?.durationMs).toBeGreaterThanOrEqual(0);
     // Failed deliveries are still recorded in history
     expect(webhooks.getHistory()).toHaveLength(1);
   });
@@ -188,7 +186,7 @@ describe('send', () => {
     const results = await webhooks.send({ event: 'user.created', payload: { name: 'Ada' } });
 
     expect(results).toHaveLength(1);
-    expect(results[0].status).toBe(0);
+    expect(results[0]?.status).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -212,7 +210,7 @@ describe('send', () => {
     const results = await webhooks.send({ event: 'user.created', payload: { name: 'Ada' } });
 
     expect(results).toHaveLength(1);
-    expect(results[0].status).toBe(200);
+    expect(results[0]?.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sentBodies()[0].version).toBe('v2');
   });
@@ -222,7 +220,7 @@ describe('send', () => {
 
     await webhooks.send({ event: 'user.created', payload: { name: 'Ada' } });
 
-    const headers = fetchMock.mock.calls[0][1].headers;
+    const headers = fetchMock.mock.calls[0]?.[1].headers;
     expect(headers['Content-Type']).toBe('application/json');
     expect(headers['X-Webhook-Signature']).toMatch(/^[0-9a-f]{64}$/);
     expect(headers['X-Custom']).toBe('custom-value');
@@ -275,6 +273,7 @@ describe('replay', () => {
 
     const [event] = webhooks.getHistory();
     expect(event).toBeDefined();
+    if (!event) throw new Error('Missing webhook history');
 
     webhooks.unregister(originalId);
     const currentId = register({ url: URL_B, version: 'v2' });
@@ -285,15 +284,20 @@ describe('replay', () => {
     const results = await webhooks.replay(event.id, 'v1');
 
     expect(results).toHaveLength(1);
-    expect(results[0].status).toBe(200);
+    expect(results[0]?.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe(URL_B);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(URL_B);
 
     const body = sentBodies()[0];
     expect(body.event).toBe('user.created');
     expect(body.version).toBe('v1');
     expect(body.payload).toEqual({ name: 'Ada', transformed: true, from: 'v2', to: 'v1' });
-    expect(transformMock).toHaveBeenCalledWith('v2', 'v1', 'response', expect.objectContaining({ name: 'Ada' }));
+    expect(transformMock).toHaveBeenCalledWith(
+      'v2',
+      'v1',
+      'response',
+      expect.objectContaining({ name: 'Ada' }),
+    );
     expect(store.get(currentId)).toBeDefined();
   });
 
@@ -301,6 +305,7 @@ describe('replay', () => {
     register({ version: 'v2' });
     await webhooks.send({ event: 'user.created', payload: { name: 'Ada' } });
     const [event] = webhooks.getHistory();
+    if (!event) throw new Error('Missing webhook history');
 
     const results = await webhooks.replay(event.id, 'v2');
 

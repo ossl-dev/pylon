@@ -17,14 +17,8 @@ export function rename<T extends Record<string, any>, M extends RenameMap>(
   obj: T,
   mapping: M,
 ): Omit<T, keyof M> & { [K in M[keyof M]]: any };
-export function rename(
-  obj: Record<string, any>,
-  mapping: RenameMap,
-): Record<string, any>;
-export function rename(
-  obj: Record<string, any>,
-  mapping: RenameMap,
-): Record<string, any> {
+export function rename(obj: Record<string, any>, mapping: RenameMap): Record<string, any>;
+export function rename(obj: Record<string, any>, mapping: RenameMap): Record<string, any> {
   if (obj == null) return {};
   const result: Record<string, any> = {};
   for (const key of Object.keys(obj)) {

@@ -1,4 +1,4 @@
-import type { VersionsConfig, VersionDefinition, VersionFormat } from './types.js';
+import type { VersionDefinition, VersionFormat, VersionsConfig } from './types.js';
 
 /**
  * Normalizes version strings to internal order indices and back.
@@ -38,9 +38,25 @@ export class VersionNormalizer {
     } else if ('preset' in config && config.preset === 'stripe') {
       this.initStripe(current);
     } else if ('format' in config && config.format === 'custom') {
-      this.initCustom(config as unknown as { parse: (v: string) => { order: number; label: string }; formatVersion: (v: any) => string; compare?: (a: string, b: string) => number }, current);
+      this.initCustom(
+        config as unknown as {
+          parse: (v: string) => { order: number; label: string };
+          formatVersion: (v: any) => string;
+          compare?: (a: string, b: string) => number;
+        },
+        current,
+      );
     } else if ('format' in config) {
-      this.initFromFormat(config as { format: VersionFormat; prefix?: string; dateFormat?: string; calverFormat?: string; aliases?: Record<string, string> }, current);
+      this.initFromFormat(
+        config as {
+          format: VersionFormat;
+          prefix?: string;
+          dateFormat?: string;
+          calverFormat?: string;
+          aliases?: Record<string, string>;
+        },
+        current,
+      );
     }
   }
 
@@ -49,8 +65,14 @@ export class VersionNormalizer {
    * Generates versions from the current version back to 1.
    */
   private initFromFormat(
-    formatCfg: { format: VersionFormat; prefix?: string; dateFormat?: string; calverFormat?: string; aliases?: Record<string, string> },
-    current: string
+    formatCfg: {
+      format: VersionFormat;
+      prefix?: string;
+      dateFormat?: string;
+      calverFormat?: string;
+      aliases?: Record<string, string>;
+    },
+    current: string,
   ): void {
     if (formatCfg.aliases) {
       for (const [alias, target] of Object.entries(formatCfg.aliases)) {
@@ -164,8 +186,12 @@ export class VersionNormalizer {
    * Initialize with custom parse/format functions.
    */
   private initCustom(
-    cfg: { parse: (v: string) => { order: number; label: string }; formatVersion: (v: any) => string; compare?: (a: string, b: string) => number },
-    current: string
+    cfg: {
+      parse: (v: string) => { order: number; label: string };
+      formatVersion: (v: any) => string;
+      compare?: (a: string, b: string) => number;
+    },
+    current: string,
   ): void {
     this.customCompare = cfg.compare;
 

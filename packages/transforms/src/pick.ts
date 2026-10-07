@@ -8,10 +8,10 @@
  *
  * Handles: non-existent keys (silently skipped), null/undefined input (returns {})
  */
-export function pick<
-  T extends Record<string, any>,
-  K extends keyof T,
->(obj: T | null | undefined, keys: K[]): Pick<T, K>;
+export function pick<T extends Record<string, any>, K extends keyof T>(
+  obj: T | null | undefined,
+  keys: K[],
+): Pick<T, K>;
 export function pick(
   obj: Record<string, any> | null | undefined,
   keys: string[],

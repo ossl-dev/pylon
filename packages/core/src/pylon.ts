@@ -1,18 +1,18 @@
 import { z } from 'zod';
-import { VersionNormalizer } from './version-normalizer.js';
-import { VersionDetector } from './version-detector.js';
-import { TransformEngine } from './transform-engine.js';
 import { validateConfig } from './config.js';
+import { TransformEngine } from './transform-engine.js';
 import type {
-  PylonConfig,
-  ProcessRequestOptions,
-  VersionResult,
-  TransformResult,
   DebugInfo,
+  EndpointConfig,
+  ProcessRequestOptions,
+  PylonConfig,
   RollbackConfig,
   RollbackStatus,
-  EndpointConfig,
+  TransformResult,
+  VersionResult,
 } from './types.js';
+import { VersionDetector } from './version-detector.js';
+import { VersionNormalizer } from './version-normalizer.js';
 
 /**
  * The main Pylon class for API versioning.
@@ -40,30 +40,23 @@ export class Pylon {
   private rollbacks: Map<string, RollbackStatus>;
   private unpublished: Set<string>;
   /** Mutable deprecation state tracked at the Pylon instance level */
-  private deprecations: Map<string, { deprecated: boolean; sunsetDate?: string; migrationGuide?: string }>;
+  private deprecations: Map<
+    string,
+    { deprecated: boolean; sunsetDate?: string; migrationGuide?: string }
+  >;
 
   constructor(config: PylonConfig) {
     const validation = validateConfig(config);
     if (!validation.valid) {
-      throw new Error(
-        `Pylon config validation failed:\n  ${validation.errors.join('\n  ')}`
-      );
+      throw new Error(`Pylon config validation failed:\n  ${validation.errors.join('\n  ')}`);
     }
 
     this.config = config;
     this.current = config.current;
     this.defaultVersion = config.defaultVersion ?? config.current;
     this.normalizer = new VersionNormalizer(config.versions, config.current);
-    this.detector = new VersionDetector(
-      config.versioning,
-      this.normalizer,
-      this.defaultVersion
-    );
-    this.engine = new TransformEngine(
-      config.transforms,
-      config.schemas,
-      this.normalizer
-    );
+    this.detector = new VersionDetector(config.versioning, this.normalizer, this.defaultVersion);
+    this.engine = new TransformEngine(config.transforms, config.schemas, this.normalizer);
     this.rollbacks = new Map();
     this.unpublished = new Set();
     this.deprecations = new Map();
@@ -93,7 +86,7 @@ export class Pylon {
     path: string,
     query: Record<string, string>,
     body?: unknown,
-    options?: ProcessRequestOptions
+    options?: ProcessRequestOptions,
   ): Promise<{
     headers: Record<string, string>;
     body: unknown;
@@ -155,13 +148,14 @@ export class Pylon {
               this.current,
               'request',
               body,
-              (err) => this.config.onTransformError?.({
-                source: rollback.fallbackVersion,
-                target: this.current,
-                direction: 'request',
-                originalError: err instanceof Error ? err : new Error(String(err)),
-                endpoint: options?.endpoint,
-              })
+              (err) =>
+                this.config.onTransformError?.({
+                  source: rollback.fallbackVersion,
+                  target: this.current,
+                  direction: 'request',
+                  originalError: err instanceof Error ? err : new Error(String(err)),
+                  endpoint: options?.endpoint,
+                }),
             );
 
             if (transformResult.data !== undefined) {
@@ -233,13 +227,14 @@ export class Pylon {
           this.current,
           'request',
           body,
-          (err) => this.config.onTransformError?.({
-            source: clientVersion,
-            target: this.current,
-            direction: 'request',
-            originalError: err instanceof Error ? err : new Error(String(err)),
-            endpoint: options?.endpoint,
-          })
+          (err) =>
+            this.config.onTransformError?.({
+              source: clientVersion,
+              target: this.current,
+              direction: 'request',
+              originalError: err instanceof Error ? err : new Error(String(err)),
+              endpoint: options?.endpoint,
+            }),
         );
 
         if (transformResult.data !== undefined) {
@@ -360,7 +355,7 @@ export class Pylon {
     responseBody: unknown,
     responseHeaders: Record<string, string>,
     transformsApplied: string[],
-    debug?: DebugInfo
+    debug?: DebugInfo,
   ): Promise<{
     headers: Record<string, string>;
     body: unknown;
@@ -384,12 +379,13 @@ export class Pylon {
         clientVersion,
         'response',
         responseBody,
-        (err) => this.config.onTransformError?.({
-          source: this.current,
-          target: clientVersion,
-          direction: 'response',
-          originalError: err instanceof Error ? err : new Error(String(err)),
-        })
+        (err) =>
+          this.config.onTransformError?.({
+            source: this.current,
+            target: clientVersion,
+            direction: 'response',
+            originalError: err instanceof Error ? err : new Error(String(err)),
+          }),
       );
 
       if (result.data !== undefined) {
@@ -453,14 +449,9 @@ export class Pylon {
     headers: Record<string, string>,
     path: string,
     query: Record<string, string>,
-    body?: unknown
+    body?: unknown,
   ): VersionResult {
-    return this.detector.detect(
-      headers,
-      path,
-      query,
-      body as Record<string, unknown>
-    );
+    return this.detector.detect(headers, path, query, body as Record<string, unknown>);
   }
 
   /**
@@ -476,7 +467,7 @@ export class Pylon {
     source: string,
     target: string,
     direction: 'request' | 'response',
-    data: unknown
+    data: unknown,
   ): Promise<TransformResult> {
     return this.engine.execute(source, target, direction, data);
   }
@@ -488,10 +479,7 @@ export class Pylon {
    * @param version - The version whose schema to validate against
    * @returns An object with `success` flag and optional `errors`
    */
-  validate(
-    data: unknown,
-    version: string
-  ): { success: boolean; errors?: z.ZodError } {
+  validate(data: unknown, version: string): { success: boolean; errors?: z.ZodError } {
     const schema = this.config.schemas[version];
     if (!schema) {
       return { success: true };
@@ -564,7 +552,7 @@ export class Pylon {
    */
   async retire(
     version: string,
-    config: { sunsetDate?: string; migrationGuide?: string }
+    config: { sunsetDate?: string; migrationGuide?: string },
   ): Promise<void> {
     const resolved = this.normalizer.resolveAlias(version);
     if (!this.normalizer.isValid(resolved)) {
@@ -595,10 +583,7 @@ export class Pylon {
    * @param version - The version to deprecate
    * @param config - Optional deprecation configuration
    */
-  deprecate(
-    version: string,
-    config?: { sunsetDate?: string; migrationGuide?: string }
-  ): void {
+  deprecate(version: string, config?: { sunsetDate?: string; migrationGuide?: string }): void {
     const resolved = this.normalizer.resolveAlias(version);
     this.deprecations.set(resolved, {
       deprecated: true,
@@ -633,7 +618,7 @@ export class Pylon {
    */
   private generateResponseHeaders(
     clientVersion: string,
-    currentVersion: string
+    currentVersion: string,
   ): Record<string, string> {
     const headers: Record<string, string> = {};
     const headerConfig = this.config.versioning?.headers;
@@ -722,10 +707,7 @@ export class Pylon {
    * Endpoint-specific transforms and schemas override global ones at the key level.
    * Avoids circular dependency with endpoint.ts by inlining the merge logic.
    */
-  private mergeEndpointConfig(
-    global: PylonConfig,
-    endpoint: EndpointConfig
-  ): PylonConfig {
+  private mergeEndpointConfig(global: PylonConfig, endpoint: EndpointConfig): PylonConfig {
     return {
       ...global,
       current: endpoint.current ?? global.current,
@@ -737,14 +719,14 @@ export class Pylon {
         ...(global.transforms ?? {}),
         ...(endpoint.transforms ?? {}),
       },
-      versioning: endpoint.versioning === false
-        ? undefined
-        : global.versioning,
-      ...(endpoint.minVersion ? {
-        versioning: {
-          ...(global.versioning ?? { sources: [] }),
-        },
-      } : {}),
+      versioning: endpoint.versioning === false ? undefined : global.versioning,
+      ...(endpoint.minVersion
+        ? {
+            versioning: {
+              ...(global.versioning ?? { sources: [] }),
+            },
+          }
+        : {}),
     };
   }
 

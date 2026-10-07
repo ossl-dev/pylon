@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 
 export type VersionFormat = 'semantic' | 'numeric' | 'date-monthly' | 'date-daily' | 'calver';
 export type TransformDirection = 'request' | 'response';
@@ -106,7 +106,13 @@ export interface CustomVersionsConfig {
 }
 
 export type VersionsConfig =
-  | { format: VersionFormat; prefix?: string; dateFormat?: string; calverFormat?: string; aliases?: Record<string, string> }
+  | {
+      format: VersionFormat;
+      prefix?: string;
+      dateFormat?: string;
+      calverFormat?: string;
+      aliases?: Record<string, string>;
+    }
   | VersionDefinition[]
   | StripePreset
   | CustomVersionsConfig;

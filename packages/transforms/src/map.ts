@@ -12,11 +12,7 @@
  * map({ name: 'john' }, 'missing', (val) => 'never called')
  * // => { name: 'john' } (missing key passes through)
  */
-export function map<
-  T extends Record<string, any>,
-  K extends keyof T,
-  R,
->(
+export function map<T extends Record<string, any>, K extends keyof T, R>(
   obj: T | null | undefined,
   key: K,
   fn: (value: T[K]) => R,

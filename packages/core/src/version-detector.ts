@@ -1,5 +1,5 @@
-import type { VersioningConfig, VersionSource, VersionResult } from './types.js';
-import { VersionNormalizer } from './version-normalizer.js';
+import type { VersioningConfig, VersionResult, VersionSource } from './types.js';
+import type { VersionNormalizer } from './version-normalizer.js';
 
 const DEFAULT_SOURCES: VersionSource[] = [
   { type: 'header', name: 'accept-version' },
@@ -28,7 +28,7 @@ export class VersionDetector {
   constructor(
     config: VersioningConfig | undefined,
     normalizer: VersionNormalizer,
-    defaultVersion: string
+    defaultVersion: string,
   ) {
     this.sources = config?.sources ?? DEFAULT_SOURCES;
     this.onMissing = config?.onMissing ?? 'use-default';
@@ -55,7 +55,7 @@ export class VersionDetector {
     headers: Record<string, string>,
     path: string,
     query: Record<string, string>,
-    body?: Record<string, unknown>
+    body?: Record<string, unknown>,
   ): VersionResult {
     // Try each source in order
     const headerResult = this.checkHeaders(headers);
@@ -97,7 +97,7 @@ export class VersionDetector {
    * Also checks `Api-Version` and any custom header names.
    */
   private checkHeaders(headers: Record<string, string>): VersionResult | null {
-    const headerSources = this.sources.filter(s => s.type === 'header');
+    const headerSources = this.sources.filter((s) => s.type === 'header');
 
     for (const source of headerSources) {
       const headerName = source.name?.toLowerCase() ?? '';
@@ -111,7 +111,10 @@ export class VersionDetector {
 
       // Check if this is a comma-separated list (negotiation)
       if (trimmed.includes(',')) {
-        const versions = trimmed.split(',').map(v => v.trim()).filter(Boolean);
+        const versions = trimmed
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean);
         if (versions.length > 1) {
           const negotiated = this.negotiate(versions);
           return { version: negotiated, source: 'header', headerName };
@@ -140,7 +143,7 @@ export class VersionDetector {
    * pattern `/\/(v\d+)\/?/`.
    */
   private checkPath(path: string): VersionResult | null {
-    const pathSources = this.sources.filter(s => s.type === 'path');
+    const pathSources = this.sources.filter((s) => s.type === 'path');
 
     for (const source of pathSources) {
       const pattern = source.pattern ?? /\/(v\d+)\/?/;
@@ -167,7 +170,7 @@ export class VersionDetector {
    * Check query parameters for a version indicator like `?api_version=v2`.
    */
   private checkQuery(query: Record<string, string>): VersionResult | null {
-    const querySources = this.sources.filter(s => s.type === 'query');
+    const querySources = this.sources.filter((s) => s.type === 'query');
 
     for (const source of querySources) {
       const paramName = source.name ?? 'api_version';
@@ -197,7 +200,7 @@ export class VersionDetector {
   private checkBody(body?: Record<string, unknown>): VersionResult | null {
     if (!body || typeof body !== 'object') return null;
 
-    const bodySources = this.sources.filter(s => s.type === 'body');
+    const bodySources = this.sources.filter((s) => s.type === 'body');
 
     for (const source of bodySources) {
       const fieldName = source.name ?? 'version';
@@ -237,7 +240,7 @@ export class VersionDetector {
     switch (strategy) {
       case 'highest-supported': {
         // Find the highest version that we support
-        const supported = versions.filter(v => this.normalizer.isValid(v));
+        const supported = versions.filter((v) => this.normalizer.isValid(v));
         if (supported.length === 0) {
           if (this.negotiation?.onUnsupported === 'reject') {
             throw new Error(`No supported API version found in: ${versions.join(', ')}`);
@@ -262,7 +265,7 @@ export class VersionDetector {
         return this.defaultVersion;
       }
       case 'closest': {
-        const valid = versions.filter(v => this.normalizer.isValid(v));
+        const valid = versions.filter((v) => this.normalizer.isValid(v));
         if (valid.length === 0) {
           if (this.negotiation?.onUnsupported === 'reject') {
             throw new Error(`No supported API version found in: ${versions.join(', ')}`);

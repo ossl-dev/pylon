@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve, extname } from 'node:path';
+import { extname, join, resolve } from 'node:path';
 
 /**
  * Result of auditing a codebase for versioning patterns.
@@ -18,7 +18,8 @@ export interface AuditResult {
 }
 
 // Patterns for detecting versioning in source code
-const ROUTE_PATTERN = /(?:router|app|route|endpoint)\.(get|post|put|patch|delete|options|head)\s*[\(\/]\s*['"`][^'"`]*['"`]/gi;
+const ROUTE_PATTERN =
+  /(?:router|app|route|endpoint)\.(get|post|put|patch|delete|options|head)\s*[(/]\s*['"`][^'"`]*['"`]/gi;
 const VERSION_IN_PATH = /\/(v\d+)\//g;
 const VERSION_CHECK = /(?:apiVersion|version|api_version)\s*[=:]\s*['"]([^'"]+)['"]/gi;
 const VERSION_HEADER = /(?:accept-version|api-version|x-api-version)/gi;
@@ -28,15 +29,7 @@ const VERSION_IF = /if\s*\(\s*(?:version|apiVersion)\s*[=!]==?\s*['"]([^'"]+)['"
 /**
  * Skip directories during audit.
  */
-const SKIP_DIRS = new Set([
-  'node_modules',
-  'dist',
-  '.git',
-  '.next',
-  'build',
-  'coverage',
-  '.cache',
-]);
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.next', 'build', 'coverage', '.cache']);
 
 /**
  * Analyze a codebase for versioning patterns.
@@ -97,9 +90,8 @@ export function scanCodebase(rootDir: string): AuditResult {
 
         // Detect routes/endpoints
         const routeMethods: string[] = [];
-        let routeMatch: RegExpExecArray | null;
         const routeRegex = new RegExp(ROUTE_PATTERN.source, 'gi');
-        while ((routeMatch = routeRegex.exec(content)) !== null) {
+        for (const routeMatch of content.matchAll(routeRegex)) {
           const method = routeMatch[1]?.toUpperCase();
           if (method && !routeMethods.includes(method)) {
             routeMethods.push(method);
@@ -108,14 +100,16 @@ export function scanCodebase(rootDir: string): AuditResult {
         // Note: routeRegex.lastIndex cannot be used to detect matches —
         // exec() resets it to 0 when it returns null.
         if (routeMethods.length > 0) {
-          patternCounts.set('route_handlers', (patternCounts.get('route_handlers') ?? 0) + routeMethods.length);
+          patternCounts.set(
+            'route_handlers',
+            (patternCounts.get('route_handlers') ?? 0) + routeMethods.length,
+          );
         }
 
         // Detect versions in paths
         const pathVersions: string[] = [];
         const versionInPathRegex = new RegExp(VERSION_IN_PATH.source, 'g');
-        let pathMatch: RegExpExecArray | null;
-        while ((pathMatch = versionInPathRegex.exec(content)) !== null) {
+        for (const pathMatch of content.matchAll(versionInPathRegex)) {
           if (pathMatch[1] && !pathVersions.includes(pathMatch[1])) {
             pathVersions.push(pathMatch[1]);
             versionSet.add(pathMatch[1]);
@@ -124,8 +118,7 @@ export function scanCodebase(rootDir: string): AuditResult {
 
         // Detect version checks
         const versionCheckRegex = new RegExp(VERSION_CHECK.source, 'gi');
-        let checkMatch: RegExpExecArray | null;
-        while ((checkMatch = versionCheckRegex.exec(content)) !== null) {
+        for (const checkMatch of content.matchAll(versionCheckRegex)) {
           if (checkMatch[1]) {
             versionSet.add(checkMatch[1]);
           }
@@ -143,8 +136,7 @@ export function scanCodebase(rootDir: string): AuditResult {
 
         // Detect version if/else
         const versionIfRegex = new RegExp(VERSION_IF.source, 'gi');
-        let ifMatch: RegExpExecArray | null;
-        while ((ifMatch = versionIfRegex.exec(content)) !== null) {
+        for (const ifMatch of content.matchAll(versionIfRegex)) {
           if (ifMatch[1]) {
             versionSet.add(ifMatch[1]);
           }
@@ -209,7 +201,9 @@ export function generateSuggestions(
   const suggestions: string[] = [];
 
   if (detectedVersions.length === 0) {
-    suggestions.push('No versioning patterns detected. Consider adding explicit version management.');
+    suggestions.push(
+      'No versioning patterns detected. Consider adding explicit version management.',
+    );
     suggestions.push('Run "pylon init" to create a pylon.config.ts.');
     return suggestions;
   }
@@ -225,7 +219,9 @@ export function generateSuggestions(
   suggestions.push(
     'Create transform functions between versions to handle request/response migration.',
   );
-  suggestions.push('Run "pylon init --from-existing ./src" to generate a config from this analysis.');
+  suggestions.push(
+    'Run "pylon init --from-existing ./src" to generate a config from this analysis.',
+  );
 
   return suggestions;
 }

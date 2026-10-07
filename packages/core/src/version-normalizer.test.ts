@@ -1,23 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { VersionNormalizer } from './version-normalizer.js';
 
 describe('VersionNormalizer', () => {
   describe('semantic format', () => {
     it('normalizes v1 to 1, v2 to 2, v3 to 3', () => {
-      const n = new VersionNormalizer(
-        { format: 'semantic', prefix: 'v' },
-        'v3',
-      );
+      const n = new VersionNormalizer({ format: 'semantic', prefix: 'v' }, 'v3');
       expect(n.normalize('v1')).toBe(1);
       expect(n.normalize('v2')).toBe(2);
       expect(n.normalize('v3')).toBe(3);
     });
 
     it('denormalizes 1 to v1, 2 to v2', () => {
-      const n = new VersionNormalizer(
-        { format: 'semantic', prefix: 'v' },
-        'v3',
-      );
+      const n = new VersionNormalizer({ format: 'semantic', prefix: 'v' }, 'v3');
       expect(n.denormalize(1)).toBe('v1');
       expect(n.denormalize(2)).toBe('v2');
     });
@@ -34,10 +28,7 @@ describe('VersionNormalizer', () => {
 
   describe('date-daily format (Stripe-style)', () => {
     it('normalizes a date string and supports comparison', () => {
-      const n = new VersionNormalizer(
-        { format: 'date-daily' },
-        '2024-03-15',
-      );
+      const n = new VersionNormalizer({ format: 'date-daily' }, '2024-03-15');
       // Current version is the last in the generated range (order > 1)
       const order = n.normalize('2024-03-15');
       expect(order).toBeGreaterThan(1);
@@ -46,24 +37,18 @@ describe('VersionNormalizer', () => {
     });
 
     it('generates multiple versions from start to current', () => {
-      const n = new VersionNormalizer(
-        { format: 'date-daily' },
-        '2024-03-15',
-      );
+      const n = new VersionNormalizer({ format: 'date-daily' }, '2024-03-15');
       const versions = n.listVersions();
       expect(versions.length).toBeGreaterThan(1);
       // Versions are sorted by order (ascending date)
-      expect(versions[0].order).toBe(1);
-      expect(versions[versions.length - 1].name).toBe('2024-03-15');
+      expect(versions[0]?.order).toBe(1);
+      expect(versions[versions.length - 1]?.name).toBe('2024-03-15');
     });
   });
 
   describe('calver format', () => {
     it('stores and normalizes a calver version', () => {
-      const n = new VersionNormalizer(
-        { format: 'calver', calverFormat: 'YYYY.MM' },
-        '2024.03',
-      );
+      const n = new VersionNormalizer({ format: 'calver', calverFormat: 'YYYY.MM' }, '2024.03');
       // Calver uses monthly generation — current is last in the range
       const order = n.normalize('2024.03');
       expect(order).toBeGreaterThan(1);
@@ -136,24 +121,18 @@ describe('VersionNormalizer', () => {
       const n = new VersionNormalizer({ preset: 'stripe' }, '2024-03-15');
       const versions = n.listVersions();
       expect(versions.length).toBeGreaterThan(1);
-      expect(versions[versions.length - 1].name).toBe('2024-03-15');
+      expect(versions[versions.length - 1]?.name).toBe('2024-03-15');
     });
   });
 
   describe('aliases', () => {
     it('resolveAlias resolves "latest" to "v4"', () => {
-      const n = new VersionNormalizer(
-        { format: 'semantic', aliases: { latest: 'v4' } },
-        'v4',
-      );
+      const n = new VersionNormalizer({ format: 'semantic', aliases: { latest: 'v4' } }, 'v4');
       expect(n.resolveAlias('latest')).toBe('v4');
     });
 
     it('normalize resolves alias and returns order', () => {
-      const n = new VersionNormalizer(
-        { format: 'semantic', aliases: { latest: 'v3' } },
-        'v3',
-      );
+      const n = new VersionNormalizer({ format: 'semantic', aliases: { latest: 'v3' } }, 'v3');
       expect(n.normalize('latest')).toBe(3);
     });
 
@@ -214,10 +193,7 @@ describe('VersionNormalizer', () => {
     });
 
     it('resolves aliases when checking validity', () => {
-      const n = new VersionNormalizer(
-        { format: 'semantic', aliases: { latest: 'v3' } },
-        'v3',
-      );
+      const n = new VersionNormalizer({ format: 'semantic', aliases: { latest: 'v3' } }, 'v3');
       expect(n.isValid('latest')).toBe(true);
     });
   });

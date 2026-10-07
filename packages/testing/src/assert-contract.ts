@@ -41,11 +41,7 @@ export interface ContractAssertion {
    * @param direction - Which direction was tested (`'request'` or `'response'`)
    * @returns `true` if the assertion passes, `false` to trigger a failure
    */
-  check?: (
-    transformed: any,
-    original: any,
-    direction: string,
-  ) => boolean | Promise<boolean>;
+  check?: (transformed: any, original: any, direction: string) => boolean | Promise<boolean>;
 }
 
 /**
@@ -115,9 +111,7 @@ export async function assertContract(
   // ------------------------------------------------------------------
   if (assertions.noDataLoss) {
     if (sample === undefined) {
-      throw new Error(
-        'assertContract: "sampleInput" is required when "noDataLoss" is true.',
-      );
+      throw new Error('assertContract: "sampleInput" is required when "noDataLoss" is true.');
     }
 
     const fn = pair.request;
@@ -153,9 +147,7 @@ export async function assertContract(
   // ------------------------------------------------------------------
   if (assertions.reversible) {
     if (sample === undefined) {
-      throw new Error(
-        'assertContract: "sampleInput" is required when "reversible" is true.',
-      );
+      throw new Error('assertContract: "sampleInput" is required when "reversible" is true.');
     }
 
     if (!pair.request) {
@@ -205,9 +197,7 @@ export async function assertContract(
       const passed = await assertions.check(transformed, sample, dir);
 
       if (!passed) {
-        throw new Error(
-          `assertContract: custom check FAILED for "${transformKey}" (${dir}).`,
-        );
+        throw new Error(`assertContract: custom check FAILED for "${transformKey}" (${dir}).`);
       }
     }
   }
