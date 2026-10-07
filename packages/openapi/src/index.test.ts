@@ -116,12 +116,12 @@ describe('zodToOpenAPISchema', () => {
     expect(result.enum).toEqual(['a', 'b', 'c']);
   });
 
-  it('converts ZodUnion to oneOf', () => {
+  it('converts ZodUnion to anyOf', () => {
     const result = zodToOpenAPISchema(z.union([z.string(), z.number()]));
 
-    expect(result.oneOf).toHaveLength(2);
-    expect(result.oneOf?.[0]?.type).toBe('string');
-    expect(result.oneOf?.[1]?.type).toBe('number');
+    expect(result.anyOf).toHaveLength(2);
+    expect(result.anyOf?.[0]?.type).toBe('string');
+    expect(result.anyOf?.[1]?.type).toBe('number');
   });
 
   it('converts ZodIntersection to allOf', () => {
@@ -141,11 +141,10 @@ describe('zodToOpenAPISchema', () => {
     expect(result.type).toBe('string');
   });
 
-  it('converts ZodNullable with nullable flag', () => {
+  it('converts ZodNullable using JSON Schema null types', () => {
     const result = zodToOpenAPISchema(z.string().nullable());
 
-    expect(result.type).toBe('string');
-    expect(result.nullable).toBe(true);
+    expect(result.anyOf).toEqual([{ type: 'string' }, { type: 'null' }]);
   });
 
   it('converts ZodDefault with default value in result', () => {
@@ -159,22 +158,21 @@ describe('zodToOpenAPISchema', () => {
     const result = zodToOpenAPISchema(z.literal(42));
 
     expect(result.type).toBe('number');
-    expect(result.enum).toEqual([42]);
+    expect(result.const).toBe(42);
   });
 
   it('converts ZodLiteral string', () => {
     const result = zodToOpenAPISchema(z.literal('active'));
 
     expect(result.type).toBe('string');
-    expect(result.enum).toEqual(['active']);
+    expect(result.const).toBe('active');
   });
 
-  it('converts ZodLiteral boolean (edge case: type string)', () => {
+  it('converts ZodLiteral boolean', () => {
     const result = zodToOpenAPISchema(z.literal(true));
 
-    // Known behavior: boolean literals get type "string"
-    expect(result.type).toBe('string');
-    expect(result.enum).toEqual([true]);
+    expect(result.type).toBe('boolean');
+    expect(result.const).toBe(true);
   });
 
   it('converts ZodRecord', () => {
@@ -203,7 +201,7 @@ describe('zodToOpenAPISchema', () => {
 
     // Nullable property is NOT optional — it's still required but can be null
     expect(result.required).toContain('name');
-    expect(result.properties?.name?.nullable).toBe(true);
+    expect(result.properties?.name?.anyOf).toEqual([{ type: 'string' }, { type: 'null' }]);
   });
 });
 
@@ -212,117 +210,10 @@ describe('zodToOpenAPISchema', () => {
 // ============================================================
 
 describe('inferPathsFromSchemas', () => {
-  it('generates GET and POST paths per version', () => {
-    const schemas = {
-      v1: z.object({ name: z.string() }),
-      v2: z.object({ name: z.string(), email: z.string() }),
-    };
-    const versions = ['v1', 'v2'];
-    const normalizer = {
-      listVersions: () => [
-        { name: 'v1', order: 1, deprecated: false },
-        { name: 'v2', order: 2, deprecated: false },
-      ],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    expect(paths).toHaveProperty('/v1/users');
-    expect(paths).toHaveProperty('/v2/users');
-    expect(paths['/v1/users']).toHaveProperty('get');
-    expect(paths['/v1/users']).toHaveProperty('post');
-    expect(paths['/v2/users']).toHaveProperty('get');
-    expect(paths['/v2/users']).toHaveProperty('post');
-  });
-
-  it('uses correct $ref format in responses', () => {
-    const schemas = { v1: z.object({ name: z.string() }) };
-    const versions = ['v1'];
-    const normalizer = {
-      listVersions: () => [{ name: 'v1', order: 1, deprecated: false }],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    const getResponse =
-      paths['/v1/users']?.get?.responses['200']?.content?.['application/json']?.schema;
-    expect(getResponse?.$ref).toBe('#/components/schemas/v1_request');
-  });
-
-  it('sanitizes version in operationId', () => {
-    const schemas = { '2024-03-15': z.object({ name: z.string() }) };
-    const versions = ['2024-03-15'];
-    const normalizer = {
-      listVersions: () => [{ name: '2024-03-15', order: 1, deprecated: false }],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    expect(paths['/2024-03-15/users']?.get?.operationId).toBe('listUsers_2024_03_15');
-  });
-
-  it('marks deprecated versions', () => {
-    const schemas = { v1: z.object({ name: z.string() }) };
-    const versions = ['v1'];
-    const normalizer = {
-      listVersions: () => [{ name: 'v1', order: 1, deprecated: true }],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    expect(paths['/v1/users']?.get?.deprecated).toBe(true);
-    expect(paths['/v1/users']?.post?.deprecated).toBe(true);
-  });
-
-  it('does not mark non-deprecated versions', () => {
-    const schemas = { v1: z.object({ name: z.string() }) };
-    const versions = ['v1'];
-    const normalizer = {
-      listVersions: () => [{ name: 'v1', order: 1, deprecated: false }],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    expect(paths['/v1/users']?.get?.deprecated).toBeUndefined();
-  });
-
-  it('skips versions missing from schemas', () => {
-    const schemas = { v2: z.object({ name: z.string() }) };
-    const versions = ['v1', 'v2'];
-    const normalizer = {
-      listVersions: () => [
-        { name: 'v1', order: 1 },
-        { name: 'v2', order: 2 },
-      ],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    // v1 has no schema, so it should be skipped
-    expect(paths).not.toHaveProperty('/v1/users');
-    expect(paths).toHaveProperty('/v2/users');
-  });
-
-  it('includes X-API-Version header parameter in paths', () => {
-    const schemas = { v1: z.object({ name: z.string() }) };
-    const versions = ['v1'];
-    const normalizer = {
-      listVersions: () => [{ name: 'v1', order: 1 }],
-    };
-
-    const paths = inferPathsFromSchemas(schemas, versions, normalizer);
-
-    const params = paths['/v1/users']?.get?.parameters;
-    expect(params?.[0]?.name).toBe('X-API-Version');
-    expect(params?.[0]?.in).toBe('header');
-    expect(params?.[0]?.required).toBe(true);
-    expect(params?.[0]?.schema.default).toBe('v1');
+  it('does not invent operations from body schemas', () => {
+    expect(inferPathsFromSchemas({ v1: z.object({ name: z.string() }) }, ['v1'])).toEqual({});
   });
 });
-
-// ============================================================
-// generateOpenAPI
-// ============================================================
 
 describe('generateOpenAPI', () => {
   function createTestPylon() {
@@ -414,41 +305,22 @@ describe('generateOpenAPI', () => {
     expect(spec.components!.schemas!['v1_request'].type).toBe('object');
   });
 
-  it('generates paths for each version', () => {
-    const pylon = createTestPylon();
-    const spec = generateOpenAPI(pylon);
-
-    expect(spec.paths).toHaveProperty('/v1/users');
-    expect(spec.paths).toHaveProperty('/v2/users');
+  it('exports legacy schemas without inventing routes', () => {
+    const spec = generateOpenAPI(createTestPylon());
+    expect(spec.paths).toEqual({});
+    expect(spec.components?.schemas).toHaveProperty('v1_request');
   });
 
-  it('filters versions when options.versions is specified', () => {
-    const pylon = createTestPylon();
-    const spec = generateOpenAPI(pylon, { versions: ['v2'] });
-
-    expect(spec.paths).toHaveProperty('/v2/users');
-    expect(spec.paths).not.toHaveProperty('/v1/users');
-    expect(spec.components!.schemas).toHaveProperty('v2_request');
-    expect(spec.components!.schemas).not.toHaveProperty('v1_request');
+  it('filters exported legacy schemas', () => {
+    const spec = generateOpenAPI(createTestPylon(), { versions: ['v2'] });
+    expect(spec.components?.schemas).toHaveProperty('v2_request');
+    expect(spec.components?.schemas).not.toHaveProperty('v1_request');
   });
 
-  it('marks deprecated paths from VersionDefinition', () => {
-    const pylon = createTestPylon();
-    const spec = generateOpenAPI(pylon);
-
-    const v1Path = spec.paths['/v1/users'] as any;
-    expect(v1Path.get.deprecated).toBe(true);
-    expect(v1Path.post.deprecated).toBe(true);
-  });
-
-  it('skips versions with no schema (graceful)', () => {
-    const pylon = createTestPylon();
-    // Include a non-existent version
-    const spec = generateOpenAPI(pylon, { versions: ['v1', 'v2', 'v3'] });
-
-    expect(spec.paths).toHaveProperty('/v1/users');
-    expect(spec.paths).toHaveProperty('/v2/users');
-    expect(spec.paths).not.toHaveProperty('/v3/users');
+  it('rejects unknown requested versions', () => {
+    expect(() => generateOpenAPI(createTestPylon(), { versions: ['v99'] })).toThrow(
+      'Unknown OpenAPI version',
+    );
   });
 
   it('includes default value from Zod schema in OpenAPI output', () => {

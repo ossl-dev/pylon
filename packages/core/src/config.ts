@@ -22,10 +22,12 @@ import { VersionNormalizer } from './version-normalizer.js';
  * @returns The same config object with full type inference
  */
 export function defineConfig<const C extends PylonOptions>(config: C): C & PylonConfig {
-  return Object.assign(config, {
-    schemas: config.schemas ?? {},
-    transforms: config.transforms ?? {},
-  });
+  if (config.schemas && config.transforms) return config as C & PylonConfig;
+  return {
+    ...config,
+    schemas: config.schemas === undefined ? {} : config.schemas,
+    transforms: config.transforms === undefined ? {} : config.transforms,
+  } as C & PylonConfig;
 }
 
 /**

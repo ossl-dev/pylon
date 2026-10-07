@@ -1,5 +1,6 @@
 export {
   generateOpenAPI,
+  generateOpenAPIVersions,
   inferPathsFromSchemas,
   zodToOpenAPISchema,
 } from './generator.js';

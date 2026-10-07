@@ -55,7 +55,16 @@ export class Pylon {
   >;
 
   constructor(options: PylonOptions) {
-    const config: PylonConfig = { schemas: {}, transforms: {}, ...options };
+    const contractMode =
+      options.contracts || Object.values(options.endpoints ?? {}).some((e) => e.contracts);
+    const config: PylonConfig = {
+      ...options,
+      schemas: options.schemas === undefined ? {} : options.schemas,
+      transforms: options.transforms === undefined ? {} : options.transforms,
+      versioning:
+        options.versioning ??
+        (contractMode ? { sources: [{ type: 'header', name: 'api-version' }] } : undefined),
+    };
     const validation = validateConfig(config);
     if (!validation.valid) {
       throw new Error(`Pylon config validation failed:\n  ${validation.errors.join('\n  ')}`);
@@ -773,7 +782,11 @@ export class Pylon {
     if (endpoint === this.endpointName && !config) return this;
     const cached = this.endpointCache.get(endpoint);
     if (cached && !config) return cached;
-    const endpointConfig = config ?? this.config.endpoints?.[endpoint];
+    const endpointConfig =
+      config ??
+      (Object.hasOwn(this.config.endpoints ?? {}, endpoint)
+        ? this.config.endpoints?.[endpoint]
+        : undefined);
     if (!endpointConfig) {
       throw new Error(`Unknown Pylon endpoint: "${endpoint}"`);
     }

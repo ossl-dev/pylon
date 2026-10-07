@@ -33,6 +33,7 @@ export interface OpenAPISpec {
     title: string;
     description?: string;
     version: string;
+    termsOfService?: string;
     contact?: { name?: string; url?: string; email?: string };
     license?: { name: string; url?: string };
   };
@@ -48,6 +49,7 @@ export interface OpenAPISpec {
 }
 
 export interface PathItem {
+  'x-pylon-contracts'?: Record<string, { request?: SchemaObject; response?: SchemaObject }>;
   operationId?: string;
   summary?: string;
   description?: string;
@@ -87,7 +89,8 @@ export interface MediaTypeObject {
 }
 
 export interface SchemaObject {
-  type?: string;
+  type?: string | string[];
+  const?: unknown;
   properties?: Record<string, SchemaObject>;
   items?: SchemaObject;
   required?: string[];

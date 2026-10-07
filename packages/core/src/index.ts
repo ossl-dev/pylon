@@ -1,3 +1,5 @@
+export type { ConfigAudit } from './audit.js';
+export { auditConfig } from './audit.js';
 export { defineConfig, validateConfig } from './config.js';
 export type { ContractTransforms, EndpointInput, EndpointOutput } from './contracts.js';
 export { defineEndpoint } from './contracts.js';
