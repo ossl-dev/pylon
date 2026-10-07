@@ -19,8 +19,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc --watch",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",

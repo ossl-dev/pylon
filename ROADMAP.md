@@ -12,7 +12,7 @@ Stuff that's built but not finished, tested, or released.
 
 ### Tests
 
-All packages have unit coverage; the adapters also share a contract suite.
+Core, transforms, adapters, CLI, OpenAPI, testing, and webhooks have unit coverage. The adapters also share a contract suite.
 
 - [x] Add unit tests for `@ossl/pylon-koa` — middleware, shadow mode, error paths
 - [x] Add unit tests for `@ossl/pylon-next` — route handler wrapper, request passthrough

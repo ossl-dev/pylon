@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+- Fix build and lint configuration, source-only tests, and supported Node engines.
+- Enforce version rejection and transform failures across all five adapters; add a shared contract suite.
+- Cache transform execution steps per engine; isolate endpoint overrides and retain rollback state.
+- Preserve runtime config during CLI version edits; load TypeScript configs and generate OpenAPI specs.
+- Add UTC date ranges with explicit bounds, calendar validation, and aliases for explicit versions.
+- Fix time-travel version headers, contract round trips, and replay of lossy webhook payloads. Webhook history defaults to 1000 deliveries, configurable with `historyLimit`.
+- Preserve JSON fields without changing output prototypes; handle cyclic defaults and spaced or Unicode combined values.
+
 ### Added
 - Unit tests for all adapter packages: koa (21), next (18), openapi (44), webhooks (22), testing (24), cli (76)
-- GitHub Actions CI workflow: lint, typecheck, test matrix (Node 18/20/22, Bun 1.x), dependency audit
+- GitHub Actions CI workflow: lint, typecheck, test matrix (Node 22/24, Bun 1.x), dependency audit
 - LICENSE (MIT), CONTRIBUTING.md, CODE_OF_CONDUCT.md
 - Full date range generation for date-monthly, date-daily, calver, and Stripe preset version formats
 
@@ -20,7 +28,6 @@
 - Version normalizer: date-based formats now generate intermediate versions instead of a single entry
 
 ### Known issues
-- `assertContract` response check applies response transform directly to sample input, not to the request-transformed output
 - Devtools Transform Playground is a stub
-- Several CLI commands (generate, diff, playground) are stubs
+- CLI scaffolding, changelog generation, and the playground remain unfinished
 - No docs site yet

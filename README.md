@@ -119,7 +119,7 @@ const pylon = new Pylon({
 // Stripe style date versions
 const pylon = new Pylon({
   current: '2026-04-25',
-  versions: { format: 'date-daily', dateFormat: 'YYYY-MM-DD' },
+  versions: { format: 'date-daily', dateFormat: 'YYYY-MM-DD', start: '2026-01-01' },
 });
 
 // CalVer
@@ -132,7 +132,7 @@ const pylon = new Pylon({
 const pylon = new Pylon({
   current: 'stable',
   versions: [
-    { name: 'legacy', order: 1, deprecated: true },
+    { name: 'legacy', order: 1, aliases: ['v1', 'v1.0', 'v1.0.0'], deprecated: true },
     { name: 'beta', order: 2 },
     { name: 'stable', order: 3 },
   ],
