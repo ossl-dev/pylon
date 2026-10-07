@@ -11,6 +11,8 @@ export interface VersionDefinition {
   name: string;
   order: number;
   deprecated?: boolean;
+  unpublished?: boolean;
+  retired?: boolean;
   sunsetDate?: string;
   migrationGuide?: string;
   aliases?: string[];

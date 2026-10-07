@@ -36,14 +36,30 @@ export async function assertContract(
       `assertContract: transform not found for key "${key}". Available keys: ${Object.keys(pylon.config.transforms).join(', ') || '(none)'}`,
     );
   const sample = assertions.sampleInput;
-  if ((assertions.noDataLoss || assertions.reversible || assertions.check) && sample === undefined)
+  const hasSample = Object.hasOwn(assertions, 'sampleInput');
+  if ((assertions.noDataLoss || assertions.reversible || assertions.check) && !hasSample)
     throw new Error('assertContract: "sampleInput" is required for these assertions.');
   if (assertions.reversible && pylon.config.contracts)
     throw new Error(
       'Request and response contracts are independent. Use sampleResponse and check instead of reversible.',
     );
-  const forward =
-    pair.request && sample !== undefined ? await apply(pair.request, sample) : undefined;
+  const preserved = assertions.noDataLoss ? structuredClone(sample) : sample;
+  const [source, target] = key.split('->') as [string, string];
+  const migrate = async (direction: TransformDirection, input: unknown) => {
+    const fn = pair[direction];
+    if (!fn) return undefined;
+    if (!pylon.config.contracts) return apply(fn, input);
+    const result = await pylon.transform(
+      direction === 'request' ? source : target,
+      direction === 'request' ? target : source,
+      direction,
+      input,
+    );
+    if (result.status === 'error')
+      throw new Error(`assertContract: ${direction} migration failed: ${result.error?.message}`);
+    return result.data;
+  };
+  const forward = pair.request && hasSample ? await migrate('request', sample) : undefined;
   if (assertions.noDataLoss) {
     if (!pair.request)
       throw new Error(
@@ -58,7 +74,7 @@ export async function assertContract(
       throw new Error(
         `assertContract: noDataLoss check failed for "${key}" (request). Input and transform output must be objects.`,
       );
-    const input = sample as Record<string, unknown>;
+    const input = preserved as Record<string, unknown>;
     const output = forward as Record<string, unknown>;
     const fields = new Map(Object.entries(assertions.fieldMap ?? {}));
     const missing = Object.keys(input).filter(
@@ -97,7 +113,7 @@ export async function assertContract(
       if (
         direction === 'response' &&
         pylon.config.contracts &&
-        assertions.sampleResponse === undefined
+        !Object.hasOwn(assertions, 'sampleResponse')
       )
         throw new Error(
           'assertContract: "sampleResponse" is required for response contract checks.',
@@ -105,8 +121,12 @@ export async function assertContract(
       const original =
         direction === 'request'
           ? sample
-          : (assertions.sampleResponse ?? (pair.request ? forward : sample));
-      const output = direction === 'request' ? forward : await apply(fn, original);
+          : Object.hasOwn(assertions, 'sampleResponse')
+            ? assertions.sampleResponse
+            : pair.request
+              ? forward
+              : sample;
+      const output = direction === 'request' ? forward : await migrate('response', original);
       if (!(await assertions.check(output, original, direction)))
         throw new Error(`assertContract: custom check FAILED for "${key}" (${direction}).`);
     }

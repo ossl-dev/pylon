@@ -17,6 +17,8 @@ import type {
 import { VersionDetectionError, VersionDetector } from './version-detector.js';
 import { VersionNormalizer } from './version-normalizer.js';
 
+const emptySchema = z.undefined();
+
 /**
  * The main Pylon class for API versioning.
  *
@@ -40,6 +42,7 @@ export class Pylon {
   readonly normalizer: VersionNormalizer;
   readonly detector: VersionDetector;
   readonly engine: TransformEngine;
+  readonly hasPipeline: boolean;
   private rollbacks: Map<string, RollbackStatus>;
   private unpublished: Set<string>;
   private retired = new Set<string>();
@@ -71,6 +74,10 @@ export class Pylon {
     }
 
     this.config = config;
+    this.hasPipeline =
+      Boolean(config.contracts) ||
+      !Object.values(config.endpoints ?? {}).some((e) => e.contracts) ||
+      Boolean(Object.keys(config.schemas).length || Object.keys(config.transforms).length);
     this.normalizer = new VersionNormalizer(config.versions, config.current);
     this.current = this.normalizer.resolveAlias(config.current);
     this.defaultVersion = this.normalizer.resolveAlias(config.defaultVersion ?? config.current);
@@ -79,7 +86,12 @@ export class Pylon {
         throw new Error(`Configured version "${version}" is not in the version definitions`);
     }
     this.detector = new VersionDetector(config.versioning, this.normalizer, this.defaultVersion);
-    this.engine = new TransformEngine(config.transforms, config.schemas, this.normalizer);
+    this.engine = new TransformEngine(
+      config.transforms,
+      config.schemas,
+      this.normalizer,
+      config.contracts,
+    );
     this.rollbacks = new Map();
     this.unpublished = new Set();
     this.deprecations = new Map();
@@ -90,6 +102,21 @@ export class Pylon {
           sunsetDate: version.sunsetDate,
           migrationGuide: version.migrationGuide,
         });
+      if (version.unpublished || version.retired) {
+        this.unpublished.add(version.name);
+        this.rollbacks.set(version.name, {
+          unpublishedVersion: version.name,
+          fallbackVersion: this.current,
+          timestamp: new Date(),
+          reason: version.retired ? 'Version permanently retired' : 'Version unpublished',
+          mode: 'reject',
+          active: true,
+        });
+        if (version.retired) {
+          this.retired.add(version.name);
+          this.deprecate(version.name, version);
+        }
+      }
     }
     for (const [name, endpoint] of Object.entries(config.endpoints ?? {})) {
       if (!endpoint.contracts || !endpoint.method || !endpoint.path) continue;
@@ -149,7 +176,15 @@ export class Pylon {
           endpoint: undefined,
         });
     }
-    const startTime = Date.now();
+    if (!this.hasPipeline)
+      return {
+        headers: {},
+        body,
+        version: this.current,
+        transformResult: { status: 'success', data: body },
+      };
+    const startTime =
+      this.config.debug?.enabled || this.config.observability?.onTransform ? performance.now() : 0;
 
     let versionResult: VersionResult;
     try {
@@ -197,6 +232,7 @@ export class Pylon {
     const effectiveVersion =
       rollback?.mode === 'downgrade' ? rollback.fallbackVersion : clientVersion;
 
+    const originalBody = this.config.debug?.enabled ? body : undefined;
     if (this.config.contracts) {
       const contract = this.config.contracts[effectiveVersion];
       if (!contract)
@@ -207,7 +243,7 @@ export class Pylon {
           400,
         );
       try {
-        const parsed = await (contract.request ?? z.undefined()).safeParseAsync(body);
+        const parsed = await (contract.request ?? emptySchema).safeParseAsync(body);
         if (!parsed.success)
           return this.requestError(
             clientVersion,
@@ -232,7 +268,7 @@ export class Pylon {
     let transformResult: TransformResult = { status: 'success', data: body };
     let transformedBody = body;
 
-    if (effectiveVersion !== this.current) {
+    if (effectiveVersion !== this.current && (this.config.contracts || body != null)) {
       try {
         transformResult = await this.engine.execute(
           effectiveVersion,
@@ -245,7 +281,7 @@ export class Pylon {
               target: this.current,
               direction: 'request',
               originalError: err instanceof Error ? err : new Error(String(err)),
-              endpoint: options?.endpoint,
+              endpoint: options?.endpoint ?? this.endpointName,
             }),
         );
 
@@ -274,23 +310,13 @@ export class Pylon {
     }
 
     // 3. Validate against current version's schema
-    const schema = this.config.contracts
-      ? (this.config.contracts[this.current]?.request ?? z.undefined())
-      : this.config.schemas[this.current];
-    if (schema && (!this.config.contracts || effectiveVersion !== this.current)) {
+    const schema = !this.config.contracts && this.config.schemas[this.current];
+    if (schema) {
       try {
         const parsed = await schema.parseAsync(transformedBody);
         transformedBody = parsed;
       } catch (err: any) {
         if (err instanceof z.ZodError) {
-          if (this.config.contracts)
-            return this.requestError(
-              clientVersion,
-              'REQUEST_CONTRACT_FAILED',
-              'Request migration produced an invalid current contract',
-              500,
-              { issues: err.issues },
-            );
           return {
             status: 422,
             headers: {
@@ -325,13 +351,13 @@ export class Pylon {
     const responseHeaders = this.generateResponseHeaders(clientVersion, this.current);
 
     // Observability hook
-    const durationMs = Date.now() - startTime;
+    const durationMs = startTime ? performance.now() - startTime : 0;
     this.config.observability?.onTransform?.({
       source: clientVersion,
       target: this.current,
       direction: 'request',
       durationMs,
-      endpoint: options?.endpoint,
+      endpoint: options?.endpoint ?? this.endpointName,
     });
 
     const debug = this.config.debug?.enabled
@@ -339,7 +365,7 @@ export class Pylon {
           clientVersion,
           currentVersion: this.current,
           transformsApplied,
-          originalRequest: body,
+          originalRequest: originalBody,
           transformedRequest: transformedBody,
           startTime,
         })
@@ -362,6 +388,13 @@ export class Pylon {
     details?: Record<string, unknown>,
   ) {
     const error = { code, message, ...(details ? { details } : {}) };
+    this.config.observability?.onError?.({
+      source: version,
+      target: this.current,
+      direction: 'request',
+      originalError: new TransformError(message, code, details),
+      endpoint: this.endpointName,
+    });
     return {
       status,
       headers: {
@@ -401,7 +434,8 @@ export class Pylon {
     body: unknown;
     debug?: DebugInfo;
   }> {
-    const startTime = Date.now();
+    const startTime =
+      this.config.debug?.enabled || this.config.observability?.onTransform ? performance.now() : 0;
 
     if (!this.needsResponseProcessing(clientVersion, status))
       return { headers: responseHeaders, body: responseBody, debug };
@@ -422,7 +456,7 @@ export class Pylon {
     try {
       if (this.config.contracts)
         transformedBody = await (
-          this.config.contracts[this.current]?.response ?? z.undefined()
+          this.config.contracts[this.current]?.response ?? emptySchema
         ).parseAsync(transformedBody);
       const result = await this.engine.execute(
         this.current,
@@ -446,18 +480,13 @@ export class Pylon {
         );
       }
       transformedBody = result.data;
-      if (this.config.contracts && targetVersion !== this.current) {
-        const contract = this.config.contracts[targetVersion];
-        if (!contract)
-          throw new Error(`Endpoint has no response contract for version "${targetVersion}"`);
-        transformedBody = await (contract.response ?? z.undefined()).parseAsync(transformedBody);
-      }
     } catch (err: any) {
       this.config.observability?.onError?.({
         source: this.current,
         target: clientVersion,
         direction: 'response',
         originalError: err instanceof Error ? err : new Error(String(err)),
+        endpoint: this.endpointName,
       });
 
       return {
@@ -475,6 +504,14 @@ export class Pylon {
         debug,
       };
     }
+
+    this.config.observability?.onTransform?.({
+      source: this.current,
+      target: targetVersion,
+      direction: 'response',
+      durationMs: startTime ? performance.now() - startTime : 0,
+      endpoint: this.endpointName,
+    });
 
     const updatedDebug = this.config.debug?.enabled
       ? this.buildDebugInfo({
@@ -501,16 +538,18 @@ export class Pylon {
   needsResponseProcessing(version: string, status = 200): boolean {
     if (status < 200 || status >= 300 || status === 204 || status === 205) return false;
     const canonical = this.normalizer.resolveAlias(version);
-    const target =
-      this.getRollback(canonical)?.mode === 'downgrade'
-        ? this.getRollback(canonical)!.fallbackVersion
-        : canonical;
+    const rollback = this.getRollback(canonical);
+    const target = rollback?.mode === 'downgrade' ? rollback.fallbackVersion : canonical;
     return Boolean(this.config.contracts) || target !== this.current;
   }
 
   forRoute(method: string, path: string): Pylon {
-    const pathname = path.split('?')[0] ?? path;
-    const exact = this.staticRoutes.get(`${method} ${pathname.replace(/\/$/, '')}`);
+    if (!this.staticRoutes.size && !this.routes.length) return this;
+    const query = path.indexOf('?');
+    const pathname = query < 0 ? path : path.slice(0, query);
+    const exact = this.staticRoutes.get(
+      `${method} ${pathname.endsWith('/') ? pathname.slice(0, -1) : pathname}`,
+    );
     if (exact) return this.forEndpoint(exact);
     const route = this.routes.find((route) => route.method === method && route.path.test(pathname));
     return route ? this.forEndpoint(route.name) : this;
@@ -552,6 +591,22 @@ export class Pylon {
     direction: 'request' | 'response',
     data: unknown,
   ): Promise<TransformResult> {
+    if (this.config.contracts) {
+      const contract = this.config.contracts[this.normalizer.resolveAlias(source)];
+      if (!contract)
+        throw new TransformError(`Unknown contract source: "${source}"`, 'INVALID_SOURCE_VERSION');
+      const parsed = await (contract[direction] ?? emptySchema).safeParseAsync(data);
+      if (!parsed.success)
+        return {
+          status: 'error',
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Source contract validation failed',
+            details: { issues: parsed.error.issues },
+          },
+        };
+      data = parsed.data;
+    }
     return this.engine.execute(source, target, direction, data);
   }
 
@@ -562,8 +617,26 @@ export class Pylon {
    * @param version - The version whose schema to validate against
    * @returns An object with `success` flag and optional `errors`
    */
-  validate(data: unknown, version: string): { success: boolean; errors?: z.ZodError } {
-    const schema = this.config.schemas[version];
+  private validationSchema(version: string, direction: 'request' | 'response') {
+    version = this.normalizer.resolveAlias(version);
+    if (this.config.contracts) {
+      const contract = this.config.contracts[version];
+      if (!contract)
+        throw new TransformError(
+          `Unknown contract version: "${version}"`,
+          'INVALID_SOURCE_VERSION',
+        );
+      return contract[direction] ?? emptySchema;
+    }
+    return this.config.schemas[version];
+  }
+
+  validate(
+    data: unknown,
+    version: string,
+    direction: 'request' | 'response' = 'request',
+  ): { success: boolean; errors?: z.ZodError } {
+    const schema = this.validationSchema(version, direction);
     if (!schema) {
       return { success: true };
     }
@@ -574,6 +647,17 @@ export class Pylon {
     }
 
     return { success: false, errors: result.error };
+  }
+
+  async validateAsync(
+    data: unknown,
+    version: string,
+    direction: 'request' | 'response' = 'request',
+  ): Promise<{ success: boolean; errors?: z.ZodError }> {
+    const schema = this.validationSchema(version, direction);
+    if (!schema) return { success: true };
+    const result = await schema.safeParseAsync(data);
+    return result.success ? { success: true } : { success: false, errors: result.error };
   }
 
   /**
@@ -598,7 +682,13 @@ export class Pylon {
     }
 
     const resolvedVersion = this.normalizer.resolveAlias(version);
-    const mode = config.mode ?? 'downgrade';
+    const contractMode =
+      this.config.contracts || Object.values(this.config.endpoints ?? {}).some((e) => e.contracts);
+    const mode = config.mode ?? (contractMode ? 'reject' : 'downgrade');
+    if (contractMode && mode !== 'reject')
+      throw new Error(
+        'Contract rollbacks must reject the unpublished version. Clients select the fallback explicitly; request and response migrations are not inverses.',
+      );
 
     this.unpublished.add(resolvedVersion);
 
@@ -764,7 +854,7 @@ export class Pylon {
       transformedRequest: info.transformedRequest,
       originalResponse: info.originalResponse,
       transformedResponse: info.transformedResponse,
-      durationMs: Date.now() - info.startTime,
+      durationMs: performance.now() - info.startTime,
     };
   }
 

@@ -1,4 +1,11 @@
-import type { SchemaMap, TransformDirection, TransformPair, TransformResult } from './types.js';
+import { z } from 'zod';
+import type {
+  ContractMap,
+  SchemaMap,
+  TransformDirection,
+  TransformPair,
+  TransformResult,
+} from './types.js';
 import type { VersionNormalizer } from './version-normalizer.js';
 
 type TransformFunction = Exclude<NonNullable<TransformPair['request']>, 'identity'>;
@@ -6,7 +13,10 @@ interface TransformStep {
   key: string;
   pair: TransformPair;
   fn: TransformFunction;
+  schema?: z.ZodTypeAny;
 }
+const emptySchema = z.undefined();
+const identity: TransformFunction = (input) => input;
 
 export class TransformError extends Error {
   constructor(
@@ -31,6 +41,7 @@ export class TransformEngine {
     transforms: Record<string, TransformPair>,
     private schemas: SchemaMap,
     private normalizer: VersionNormalizer,
+    private contracts?: ContractMap,
   ) {
     this.transforms = new Map(Object.entries(transforms).map(([key, pair]) => [key, { ...pair }]));
   }
@@ -100,11 +111,31 @@ export class TransformEngine {
     ]);
     const cached = this.stepCache.get(cacheKey);
     if (cached) return cached;
+    if (
+      this.contracts &&
+      ((direction === 'request' && this.normalizer.compare(source, target) > 0) ||
+        (direction === 'response' && this.normalizer.compare(source, target) < 0))
+    )
+      throw new TransformError(
+        'Contract requests upgrade; responses downgrade',
+        'INVALID_TRANSFORM_DIRECTION',
+      );
     const steps: TransformStep[] = [];
     for (const key of this.buildChain(source, target)) {
       const pair = this.transforms.get(key);
       const fn = pair?.[direction];
-      if (pair && typeof fn === 'function') steps.push({ key, pair, fn });
+      if (pair && (typeof fn === 'function' || this.contracts)) {
+        const [from, to] = key.split('->');
+        const version = direction === 'request' ? to : from;
+        steps.push({
+          key,
+          pair,
+          fn: typeof fn === 'function' ? fn : identity,
+          schema: this.contracts
+            ? (this.contracts[version ?? '']?.[direction] ?? emptySchema)
+            : undefined,
+        });
+      }
     }
     this.stepCache.set(cacheKey, steps);
     return steps;
@@ -121,11 +152,16 @@ export class TransformEngine {
     const steps = this.getSteps(source, target, direction);
     const composed: TransformFunction = (input) => {
       let data = input;
-      for (const { fn } of steps) {
+      for (const { fn, schema } of steps) {
         data =
           data != null && typeof data.then === 'function'
             ? Promise.resolve(data).then(fn)
             : fn(data);
+        if (schema)
+          data =
+            data != null && typeof data.then === 'function'
+              ? Promise.resolve(data).then((value) => schema.parseAsync(value))
+              : schema.parseAsync(data);
       }
       return data;
     };
@@ -147,14 +183,15 @@ export class TransformEngine {
       return { status: 'success', data: input };
     }
     const steps = this.getSteps(source, target, direction);
-    if (input == null) return { status: 'success', data: input };
     let data = input;
     let status: 'success' | 'fallback' = 'success';
 
-    for (const { key, pair, fn } of steps) {
+    for (const { key, pair, fn, schema } of steps) {
+      const stepInput = data;
       try {
         const output = fn(data);
         data = output != null && typeof output.then === 'function' ? await output : output;
+        if (schema) data = await schema.parseAsync(data);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         const strategy = pair.onError;
@@ -162,7 +199,9 @@ export class TransformEngine {
           `Transform ${key} (${direction}) failed: ${message}`,
           strategy?.strategy === 'reject'
             ? (strategy.errorCode ?? 'TRANSFORM_REJECTED')
-            : 'EXECUTION_ERROR',
+            : schema && cause instanceof z.ZodError
+              ? `${direction.toUpperCase()}_CONTRACT_FAILED`
+              : 'EXECUTION_ERROR',
           { key, source, target, direction, originalError: message },
           { cause },
         );
@@ -184,7 +223,8 @@ export class TransformEngine {
               };
             }
             try {
-              data = await strategy.fallback(data);
+              data = await strategy.fallback(stepInput);
+              if (schema) data = await schema.parseAsync(data);
               status = 'fallback';
             } catch (fallbackError) {
               return {
@@ -218,6 +258,11 @@ export class TransformEngine {
         onError: pair.onError ?? existing?.onError,
       });
     }
-    return new TransformEngine(Object.fromEntries(merged), this.schemas, this.normalizer);
+    return new TransformEngine(
+      Object.fromEntries(merged),
+      this.schemas,
+      this.normalizer,
+      this.contracts,
+    );
   }
 }

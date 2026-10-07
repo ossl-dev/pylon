@@ -1,4 +1,5 @@
 import type { DebugInfo, Pylon } from '@ossl/pylon-core';
+import { isJSONContentType, mergeResponseHeaders } from '@ossl/pylon-core';
 import type { MiddlewareHandler } from 'hono';
 
 export interface PylonHonoOptions {
@@ -59,21 +60,7 @@ async function readBody(c: {
   }
 
   // JSON content-type
-  if (contentType.includes('json')) {
-    try {
-      return await c.req.json();
-    } catch {
-      return undefined;
-    }
-  }
-
-  // All other content types — read as text
-  try {
-    const text = await c.req.text();
-    return text || undefined;
-  } catch {
-    return undefined;
-  }
+  return isJSONContentType(contentType) ? c.req.json() : undefined;
 }
 
 /**
@@ -106,13 +93,22 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
   const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return async (c, next) => {
     const pylon = root.forRoute(c.req.method, c.req.path);
+    if (!pylon.hasPipeline) return next();
     /* ---- REQUEST PHASE ---- */
 
     // 1. Extract request components
     const headers = collectHeaders(c);
     const path = c.req.path as string;
     const query = collectQuery(c);
-    const body = await readBody(c);
+    let body: unknown;
+    try {
+      body = await readBody(c);
+    } catch {
+      return c.json(
+        { error: { code: 'INVALID_JSON', message: 'Malformed JSON request body' } },
+        400,
+      );
+    }
 
     // 2. Process request through the Pylon pipeline
     const reqResult = await pylon.processRequest(headers, path, query, body, {
@@ -139,7 +135,7 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
 
     // 6. Replace body cache so downstream `c.req.json()` / `c.req.text()`
     //    receives the *transformed* body rather than the original.
-    if (reqResult.body !== undefined && body !== undefined && reqResult.body !== body) {
+    if (reqResult.body !== undefined && reqResult.body !== body) {
       // Hono stores Promises in bodyCache even though the TS types say `string`.
       // biome-ignore lint/suspicious/noExplicitAny: bodyCache stores Promises at runtime
       (c.req as any).bodyCache = {
@@ -168,15 +164,21 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
 
     const debug: DebugInfo | undefined = c.get('pylon-debug');
 
-    // Read the response body (clone so we don't consume the original)
+    // The response body will be replaced after processing.
+    const resContentType = c.res.headers.get('content-type') ?? '';
+    if (!c.res.body || !isJSONContentType(resContentType)) return;
+    // Hono may rebuild its Response when changing headers. Read the resulting instance.
+    if (c.res.headers.has('content-length')) c.header('content-length', undefined);
     const res = c.res;
-    const resContentType = res.headers.get('content-type') ?? '';
-    if (!res.body || !resContentType.includes('json')) return;
     let resBody: unknown;
 
     try {
-      resBody = await res.clone().json();
+      resBody = await res.json();
     } catch {
+      c.res = Response.json(
+        { error: { code: 'RESPONSE_TRANSFORM_FAILED', message: 'Malformed JSON response body' } },
+        { status: 500, headers: reqResult.headers },
+      );
       return;
     }
 
@@ -198,21 +200,16 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     );
 
     delete resResult.headers['content-length'];
-    c.header('content-length', undefined);
 
     // 8. Build the final transformed response
     const newBodyStr = resResult.body !== undefined ? JSON.stringify(resResult.body) : null;
 
-    // Apply result headers onto the response before replacing the body,
-    // so the Context setter preserves them through its header-merge logic.
-    for (const [key, value] of Object.entries(resResult.headers)) {
-      c.header(key, value as string);
-    }
-
+    const transformedHeaders = mergeResponseHeaders(res.headers, resResult.headers);
+    transformedHeaders.delete('content-length');
     c.res = new Response(newBodyStr, {
       status: resResult.status ?? res.status,
       statusText: resResult.status ? undefined : res.statusText,
-      headers: resResult.headers,
+      headers: transformedHeaders,
     });
   };
 }

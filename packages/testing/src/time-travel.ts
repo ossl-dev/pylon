@@ -1,4 +1,5 @@
 import type { Pylon } from '@ossl/pylon-core';
+import { isJSONContentType } from '@ossl/pylon-core';
 
 export type VersionedRequest = <T = unknown>(
   method: string,
@@ -32,13 +33,23 @@ export async function timeTravel(
   callback: (version: string, request: VersionedRequest) => Promise<void>,
   options: TimeTravelOptions = {},
 ): Promise<void> {
-  const versions = options.versions ?? pylon.normalizer.listVersions().map((v) => v.name);
+  const versions =
+    options.versions ??
+    pylon.normalizer
+      .listVersions()
+      .filter(
+        (v) =>
+          !pylon.isUnpublished(v.name) &&
+          (!pylon.config.contracts || Object.hasOwn(pylon.config.contracts, v.name)),
+      )
+      .map((v) => v.name);
   const selected = new Set<string>();
   for (const version of versions) {
     if (!pylon.normalizer.isValid(version)) throw new Error(`Unknown test version: "${version}"`);
     selected.add(pylon.normalizer.resolveAlias(version));
   }
   const fetchFn = options.fetch ?? globalThis.fetch;
+  if (!selected.size) throw new Error('No published versions selected for contract tests');
   for (const version of selected) {
     const request: VersionedRequest = async (method, path, opts) => {
       method = method.toUpperCase();
@@ -93,7 +104,7 @@ export async function timeTravel(
       const responseBody =
         method === 'HEAD' || [204, 205, 304].includes(response.status)
           ? undefined
-          : /(?:application\/json|\+json)(?:\s*;|$)/i.test(contentType)
+          : isJSONContentType(contentType)
             ? await response.json()
             : await response.text();
       return {

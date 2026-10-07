@@ -46,6 +46,10 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
     next: () => Promise<unknown>,
   ) => {
     const pylon = root.forRoute(ctx.method, ctx.path);
+    if (!pylon.hasPipeline) {
+      await next();
+      return;
+    }
     // 1. Extract request data
     const headers = extractHeaders(ctx);
     const query = extractQuery(ctx);

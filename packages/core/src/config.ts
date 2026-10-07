@@ -213,6 +213,25 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
           errors.push(
             `Endpoint "${name}" requires an absolute route path with optional :name parameters`,
           );
+        const parameters = (endpoint.path ?? '').split('/').filter((part) => part.startsWith(':'));
+        if (
+          parameters.some((part) => !/^:[A-Za-z_][\w]*$/.test(part)) ||
+          new Set(parameters).size !== parameters.length
+        )
+          errors.push(`Endpoint "${name}" requires unique, whole-segment :name parameters`);
+        for (const [version, contract] of Object.entries(endpoint.contracts)) {
+          if ((endpoint.method === 'GET' || endpoint.method === 'HEAD') && contract?.request)
+            errors.push(
+              `Endpoint "${name}" ${version}: GET/HEAD contracts must omit request bodies`,
+            );
+          if (
+            (endpoint.method === 'HEAD' || endpoint.status === 204 || endpoint.status === 205) &&
+            contract?.response
+          )
+            errors.push(
+              `Endpoint "${name}" ${version}: bodyless responses must omit response schemas`,
+            );
+        }
         const route = `${endpoint.method} ${endpoint.path?.replace(/:[A-Za-z_][\w]*/g, ':param').replace(/\/$/, '')}`;
         if (routes.has(route)) errors.push(`Duplicate endpoint route: ${route}`);
         routes.add(route);

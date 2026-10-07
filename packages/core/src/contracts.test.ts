@@ -33,6 +33,152 @@ function instance(endpoint: EndpointConfig = createUser) {
 }
 
 describe('endpoint contracts', () => {
+  it('reports both directions and scoped request failures through observability hooks', async () => {
+    const onTransform = vi.fn();
+    const onError = vi.fn();
+    const pylon = new Pylon({
+      current: 'v2',
+      versions: ['v1', 'v2'],
+      endpoints: { createUser },
+      observability: { onTransform, onError },
+    }).forEndpoint('createUser');
+    await pylon.processRequest({ 'api-version': 'v1' }, '/users', {}, { name: 'Ada' });
+    await pylon.processResponse('v1', { id: 1, fullName: 'Ada', email: 'ada@example.com' }, {}, []);
+    expect(onTransform.mock.calls.map(([event]) => [event.direction, event.endpoint])).toEqual([
+      ['request', 'createUser'],
+      ['response', 'createUser'],
+    ]);
+    await pylon.processRequest({ 'api-version': 'v1' }, '/users', {}, { name: 1 });
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        direction: 'request',
+        endpoint: 'createUser',
+        originalError: expect.any(Error),
+      }),
+    );
+  });
+
+  it('parses intermediate defaults and schema transforms before the next typed migration', async () => {
+    const middleRequest = vi.fn(() => true);
+    const middleResponse = vi.fn((value: number) => String(value));
+    const endpoint = defineEndpoint({
+      method: 'POST',
+      path: '/totals',
+      contracts: {
+        v1: { request: z.object({ value: z.string() }), response: z.object({ value: z.string() }) },
+        v2: {
+          request: z
+            .object({ value: z.coerce.number(), multiplier: z.number().default(2) })
+            .refine(middleRequest),
+          response: z.object({ value: z.number().transform(middleResponse) }),
+        },
+        v3: { request: z.object({ total: z.number() }), response: z.object({ total: z.number() }) },
+      },
+      transforms: {
+        'v1->v2': { request: 'identity', response: 'identity' },
+        'v2->v3': {
+          request: (input) => ({ total: input.value * input.multiplier }),
+          response: (output) => ({ value: output.total / 2 }),
+        },
+      },
+    });
+    const pylon = new Pylon({
+      current: 'v3',
+      versions: ['v1', 'v2', 'v3'],
+      endpoints: { totals: endpoint },
+    }).forEndpoint('totals');
+    expect(
+      (await pylon.processRequest({ 'api-version': 'v1' }, '/totals', {}, { value: '10' })).body,
+    ).toEqual({ total: 20 });
+    expect((await pylon.processResponse('v1', { total: 20 }, {}, [])).body).toEqual({
+      value: '10',
+    });
+    expect(middleRequest).toHaveBeenCalledTimes(1);
+    expect(middleResponse).toHaveBeenCalledTimes(1);
+    expect(await pylon.engine.compile('v1', 'v3', 'request')({ value: '10' })).toEqual({
+      total: 20,
+    });
+  });
+
+  it('validates fallback output and gives fallbacks the failed hop input', async () => {
+    const fallback = vi.fn((input) => ({ fullName: input.name }));
+    const pylon = instance({
+      ...createUser,
+      transforms: {
+        'v1->v2': {
+          request: () => ({}),
+          response: 'identity',
+          onError: { strategy: 'fallback', fallback },
+        },
+      },
+    }).forEndpoint('createUser');
+    const result = await pylon.processRequest(
+      { 'api-version': 'v1' },
+      '/users',
+      {},
+      { name: 'Ada' },
+    );
+    expect(result.body).toEqual({ fullName: 'Ada' });
+    expect(fallback).toHaveBeenCalledWith({ name: 'Ada' });
+    expect(result.transformResult.status).toBe('fallback');
+  });
+
+  it('rejects unsafe contract rollbacks and defaults to rejecting an unpublished release', async () => {
+    const pylon = instance();
+    await expect(
+      pylon.rollback('v2', { fallback: 'v1', reason: 'broken', mode: 'downgrade' }),
+    ).rejects.toThrow('not inverses');
+    await pylon.rollback('v2', { fallback: 'v1', reason: 'broken' });
+    expect(
+      (
+        await pylon
+          .forEndpoint('createUser')
+          .processRequest({ 'api-version': 'v2' }, '/users', {}, { fullName: 'Ada' })
+      ).status,
+    ).toBe(410);
+    await pylon.publish('v2');
+    expect(pylon.isUnpublished('v2')).toBe(false);
+  });
+
+  it('retains retired hops for serving newer clients and rejects republication', async () => {
+    const pylon = new Pylon({
+      current: 'v2',
+      versions: [
+        { name: 'v1', order: 1, retired: true },
+        { name: 'v2', order: 2 },
+      ],
+      endpoints: { createUser },
+    });
+    expect(
+      (
+        await pylon
+          .forEndpoint('createUser')
+          .processRequest({ 'api-version': 'v1' }, '/users', {}, { name: 'Ada' })
+      ).status,
+    ).toBe(410);
+    expect(pylon.normalizer.listVersions()).toHaveLength(2);
+    await expect(pylon.publish('v1')).rejects.toThrow('permanently retired');
+    expect(
+      (
+        await pylon
+          .forEndpoint('createUser')
+          .processRequest({ 'api-version': 'v2' }, '/users', {}, { fullName: 'Ada' })
+      ).body,
+    ).toEqual({ fullName: 'Ada' });
+  });
+
+  it('validates directional schemas through public validation helpers', async () => {
+    const pylon = instance().forEndpoint('createUser');
+    expect(pylon.validate({ name: 'Ada' }, 'v1').success).toBe(true);
+    expect(pylon.validate({ name: 'Ada' }, 'v1', 'response').success).toBe(false);
+    expect((await pylon.validateAsync({ id: 1, name: 'Ada' }, 'v1', 'response')).success).toBe(
+      true,
+    );
+    await expect(pylon.transform('v2', 'v1', 'request', { fullName: 'Ada' })).rejects.toThrow(
+      'requests upgrade',
+    );
+  });
+
   it('infers distinct request and response types', () => {
     expectTypeOf(createUser.transforms?.['v1->v2']?.request)
       .exclude<'identity' | undefined>()

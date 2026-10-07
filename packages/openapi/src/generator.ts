@@ -49,7 +49,13 @@ export function inferPathsFromSchemas(
 export function generateOpenAPI(pylon: Pylon, options: OpenAPIGenerateOptions = {}): OpenAPISpec {
   const versions = [
     ...new Set(
-      (options.versions ?? pylon.normalizer.listVersions().map((v) => v.name)).map((version) => {
+      (
+        options.versions ??
+        pylon.normalizer
+          .listVersions()
+          .filter((v) => !pylon.isUnpublished(v.name))
+          .map((v) => v.name)
+      ).map((version) => {
         if (!pylon.normalizer.isValid(version))
           throw new Error(`Unknown OpenAPI version: "${version}"`);
         return pylon.normalizer.resolveAlias(version);
@@ -85,7 +91,7 @@ export function generateOpenAPI(pylon: Pylon, options: OpenAPIGenerateOptions = 
     );
     if (!supported.length) continue;
     const parameters: ParameterObject[] = [];
-    const path = endpoint.path.replace(/:([A-Za-z_][\w]*)/g, (_, param: string) => {
+    const path = endpoint.path.replace(/(?<=\/):([A-Za-z_][\w]*)(?=\/|$)/g, (_, param: string) => {
       parameters.push({ name: param, in: 'path', required: true, schema: { type: 'string' } });
       return `{${param}}`;
     });
@@ -164,6 +170,7 @@ export function generateOpenAPIVersions(
   return Object.fromEntries(
     pylon.normalizer
       .listVersions()
+      .filter((v) => !pylon.isUnpublished(v.name))
       .map((v) => [v.name, generateOpenAPI(pylon, { ...options, versions: [v.name] })]),
   );
 }

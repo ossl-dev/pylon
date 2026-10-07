@@ -11,6 +11,10 @@ export function pylonExpress(pylon: Pylon, options?: PylonExpressOptions): Reque
   const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return (req: Request, res: Response, next: NextFunction): void => {
     const pylon = root.forRoute(req.method, req.path);
+    if (!pylon.hasPipeline) {
+      next();
+      return;
+    }
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
       if (typeof value === 'string') headers[key] = value;

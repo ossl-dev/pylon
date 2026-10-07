@@ -198,6 +198,29 @@ for (const [name, adapter] of Object.entries(adapters)) {
       expect(response.headers.get('x-api-version')).toBe('v2');
     });
 
+    it('leaves undeclared routes untouched in a contract-only router', async () => {
+      const pylon = new Pylon({
+        current: 'v2',
+        versions: ['v1', 'v2'],
+        endpoints: {
+          other: defineEndpoint({
+            method: 'POST',
+            path: '/other',
+            contracts: {
+              v1: { request: z.string(), response: z.string() },
+              v2: { request: z.string(), response: z.string() },
+            },
+            transforms: { 'v1->v2': { request: 'identity', response: 'identity' } },
+          }),
+        },
+      });
+      const client = await adapter(pylon);
+      const response = await client.send('unrelated-version', { name: 'Ada' });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ name: 'Ada', id: 1 });
+      expect(response.headers.has('x-api-version')).toBe(false);
+    });
+
     it('rejects unknown versions before invoking the controller', async () => {
       const client = await adapter(createPylon());
       const response = await client.send('v99', { fullName: 'Ada' });

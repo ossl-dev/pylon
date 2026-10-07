@@ -36,6 +36,50 @@ function setup() {
   return { pylon, fetch };
 }
 
+it('checks contract fixtures through schema parsing and accepts explicit undefined/null bodies', async () => {
+  const pylon = new Pylon({
+    current: 'v2',
+    versions: ['v1', 'v2'],
+    endpoints: {
+      bodyless: defineEndpoint({
+        method: 'POST',
+        path: '/empty',
+        contracts: {
+          v1: { response: z.null() },
+          v2: { request: z.object({ count: z.number().default(2) }), response: z.null() },
+        },
+        transforms: { 'v1->v2': { request: () => ({}), response: 'identity' } },
+      }),
+    },
+  }).forEndpoint('bodyless');
+  await assertContract(pylon, 'v1->v2', {
+    sampleInput: undefined,
+    sampleResponse: null,
+    check: (output, original, direction) =>
+      direction === 'request'
+        ? original === undefined && output.count === 2
+        : original === null && output === null,
+  });
+});
+
+it('detects value loss when a migration mutates its input fixture', async () => {
+  const pylon = new Pylon({
+    current: 'v2',
+    versions: ['v1', 'v2'],
+    transforms: {
+      'v1->v2': {
+        request: (input) => {
+          input.name = 'changed';
+          return input;
+        },
+      },
+    },
+  });
+  await expect(
+    assertContract(pylon, 'v1->v2', { sampleInput: { name: 'Ada' }, noDataLoss: true }),
+  ).rejects.toThrow('value changed');
+});
+
 describe('wire contract testing', () => {
   it('checks actual lossy responses without reconstructing dropped fields', async () => {
     const { pylon, fetch } = setup();
@@ -155,12 +199,17 @@ describe('wire contract testing', () => {
         fieldMap: { name: 'fullName' },
       }),
     ).resolves.toBeUndefined();
-    pylon.config.transforms['v1->v2'] = {
-      request: () => ({ fullName: 'different' }),
-      response: 'identity',
-    };
+    const broken = new Pylon({
+      ...pylon.config,
+      transforms: {
+        'v1->v2': {
+          request: () => ({ fullName: 'different' }),
+          response: 'identity',
+        },
+      },
+    });
     await expect(
-      assertContract(pylon, 'v1->v2', {
+      assertContract(broken, 'v1->v2', {
         sampleInput: { name: 'Ada' },
         noDataLoss: true,
         fieldMap: { name: 'fullName' },

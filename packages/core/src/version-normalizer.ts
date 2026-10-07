@@ -94,6 +94,11 @@ export class VersionNormalizer {
   private add(version: VersionDefinition): void {
     if (!version.name || this.versionMap.has(version.name))
       throw new Error(`Empty or duplicate version name: "${version.name}"`);
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: version names must be safe in HTTP headers.
+    if (version.name.trim() !== version.name || /[\u0000-\u001f\u007f]|->/.test(version.name))
+      throw new Error(
+        'Version names cannot contain control characters, surrounding whitespace, or the -> delimiter',
+      );
     this.versions.push(version);
     this.versionMap.set(version.name, version.order);
     this.reverseMap.set(version.order, version.name);

@@ -1,4 +1,5 @@
 import type { Pylon } from '@ossl/pylon-core';
+import { isJSONContentType, mergeResponseHeaders } from '@ossl/pylon-core';
 import type { NextRequest } from 'next/server';
 
 export interface PylonNextOptions {
@@ -45,14 +46,16 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
         return handler(...args);
       }
 
+      const url = new URL(request.url);
+      const pylon = root.forRoute(request.method, url.pathname);
+      if (!pylon.hasPipeline) return handler(...args);
+
       // --- Extract request metadata ---
       const headers: Record<string, string> = {};
       request.headers.forEach((value, key) => {
         headers[key] = value;
       });
 
-      const url = new URL(request.url);
-      const pylon = root.forRoute(request.method, url.pathname);
       const query: Record<string, string> = {};
       url.searchParams.forEach((value, key) => {
         query[key] = value;
@@ -61,11 +64,14 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
       // Parse JSON body if present; otherwise leave undefined so Pylon
       // does not attempt to transform a non-JSON payload.
       let body: unknown;
-      if (request.body) {
+      if (request.body && isJSONContentType(request.headers.get('content-type') ?? '')) {
         try {
           body = await request.clone().json();
         } catch {
-          // Not JSON (FormData, plain text, etc.) — body stays undefined
+          return Response.json(
+            { error: { code: 'INVALID_JSON', message: 'Malformed JSON request body' } },
+            { status: 400 },
+          );
         }
       }
 
@@ -112,8 +118,24 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
       ) {
         // Only attempt JSON transformation when the response is actually JSON
         const contentType = responseHeaders['content-type'] ?? '';
-        if (contentType.includes('application/json')) {
-          const responseBody = await response.clone().json();
+        if (response.body && isJSONContentType(contentType)) {
+          let responseBody: unknown;
+          try {
+            responseBody = await response.json();
+          } catch {
+            const errorHeaders = mergeResponseHeaders(response.headers, result.headers);
+            errorHeaders.delete('content-length');
+            errorHeaders.set('content-type', 'application/json');
+            return Response.json(
+              {
+                error: {
+                  code: 'RESPONSE_TRANSFORM_FAILED',
+                  message: 'Malformed JSON response body',
+                },
+              },
+              { status: 500, headers: errorHeaders },
+            );
+          }
           const responseResult = await pylon.processResponse(
             clientVersion,
             responseBody,
@@ -122,12 +144,12 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
             result.debug,
             response.status,
           );
-          delete responseHeaders['content-length'];
-          delete responseResult.headers['content-length'];
+          const transformedHeaders = mergeResponseHeaders(response.headers, responseResult.headers);
+          transformedHeaders.delete('content-length');
           return new Response(JSON.stringify(responseResult.body), {
             status: responseResult.status ?? response.status,
             statusText: responseResult.status ? undefined : response.statusText,
-            headers: { ...responseHeaders, ...responseResult.headers },
+            headers: transformedHeaders,
           });
         }
 
@@ -135,7 +157,7 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
-          headers: { ...responseHeaders, ...result.headers },
+          headers: mergeResponseHeaders(response.headers, result.headers),
         });
       }
 
@@ -143,7 +165,7 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
       return new Response(response.body, {
         status: response.status,
         statusText: response.statusText,
-        headers: { ...responseHeaders, ...result.headers },
+        headers: mergeResponseHeaders(response.headers, result.headers),
       });
     }) as T;
   };

@@ -39,6 +39,11 @@ export type EndpointOutput<
   E extends { contracts: ContractMap },
   V extends keyof E['contracts'],
 > = Output<E['contracts'][V], 'response'>;
+/** Handler result before the response schema applies defaults or serialization transforms. */
+export type EndpointResult<
+  E extends { contracts: ContractMap },
+  V extends keyof E['contracts'],
+> = Input<E['contracts'][V], 'response'>;
 
 /** One operation's wire contracts. Each forward edge upgrades requests and downgrades responses. */
 export function defineEndpoint<const C extends ContractMap>(

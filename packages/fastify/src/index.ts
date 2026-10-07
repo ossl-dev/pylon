@@ -66,6 +66,7 @@ function pylonFastifyPlugin(
   // parse the request body until after the onRequest phase.
   fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
     const pylon = root.forRoute(request.method, request.url);
+    if (!pylon.hasPipeline) return;
     try {
       const result = await pylon.processRequest(
         request.headers as Record<string, string>,

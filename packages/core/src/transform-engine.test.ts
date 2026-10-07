@@ -105,15 +105,15 @@ describe('TransformEngine', () => {
       expect(result.data).toEqual({ name: 'John' });
     });
 
-    it('handles null/undefined input', async () => {
+    it('applies migrations to null/undefined input', async () => {
       const engine = createEngine();
       const nullResult = await engine.execute('v1', 'v3', 'request', null);
       expect(nullResult.status).toBe('success');
-      expect(nullResult.data).toBeNull();
+      expect(nullResult.data).toEqual({ version: 'v3' });
 
       const undefResult = await engine.execute('v1', 'v3', 'request', undefined);
       expect(undefResult.status).toBe('success');
-      expect(undefResult.data).toBeUndefined();
+      expect(undefResult.data).toEqual({ version: 'v3' });
     });
 
     it('supports async transform functions', async () => {
