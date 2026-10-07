@@ -1,359 +1,218 @@
-import type { VersionDefinition, VersionFormat, VersionsConfig } from './types.js';
+import type { VersionDefinition, VersionsConfig } from './types.js';
 
-/**
- * Normalizes version strings to internal order indices and back.
- *
- * Supports multiple version formats:
- * - **semantic**: `v1`, `v2`, `v3` (configurable prefix)
- * - **numeric**: `1`, `2`, `3`
- * - **date-monthly**: `2024-01`, `2024-02`
- * - **date-daily**: `2024-01-15`, `2024-01-16`
- * - **calver**: calendar versioning
- * - **custom**: user-provided parse/format functions
- * - **stripe preset**: date-daily with `YYYY-MM-DD` format
- */
+const MAX_GENERATED_VERSIONS = 10_000;
+
+/** Maps external names and aliases to contiguous version orders. */
 export class VersionNormalizer {
-  private versions: VersionDefinition[];
-  private aliasMap: Map<string, string>;
-  private versionMap: Map<string, number>;
-  private reverseMap: Map<number, string>;
+  private versions: VersionDefinition[] = [];
+  private aliasMap = new Map<string, string>();
+  private versionMap = new Map<string, number>();
+  private reverseMap = new Map<number, string>();
   private customCompare?: (a: string, b: string) => number;
 
-  constructor(config: VersionsConfig | undefined, current: string) {
-    this.versions = [];
-    this.aliasMap = new Map();
-    this.versionMap = new Map();
-    this.reverseMap = new Map();
-
-    if (!config) {
-      // Default: treat current as the only version
-      this.versions.push({ name: current, order: 1 });
-      this.versionMap.set(current, 1);
-      this.reverseMap.set(1, current);
-      return;
-    }
-
-    if (Array.isArray(config)) {
-      this.initFromList(config, current);
-    } else if ('preset' in config && config.preset === 'stripe') {
-      this.initStripe(current);
-    } else if ('format' in config && config.format === 'custom') {
-      this.initCustom(
-        config as unknown as {
-          parse: (v: string) => { order: number; label: string };
-          formatVersion: (v: any) => string;
-          compare?: (a: string, b: string) => number;
-        },
-        current,
-      );
-    } else if ('format' in config) {
-      this.initFromFormat(
-        config as {
-          format: VersionFormat;
-          prefix?: string;
-          dateFormat?: string;
-          calverFormat?: string;
-          aliases?: Record<string, string>;
-        },
-        current,
-      );
-    }
-  }
-
-  /**
-   * Parse version config from a format-based configuration.
-   * Generates versions from the current version back to 1.
-   */
-  private initFromFormat(
-    formatCfg: {
-      format: VersionFormat;
-      prefix?: string;
-      dateFormat?: string;
-      calverFormat?: string;
-      aliases?: Record<string, string>;
-    },
-    current: string,
-  ): void {
-    if (formatCfg.aliases) {
-      for (const [alias, target] of Object.entries(formatCfg.aliases)) {
-        this.aliasMap.set(alias, target);
-      }
-    }
-
-    switch (formatCfg.format) {
-      case 'semantic': {
-        const prefix = formatCfg.prefix ?? 'v';
-        // Parse current version number (e.g., "v5" -> 5)
-        const currentNum = parseInt(current.replace(prefix, ''), 10);
-        if (isNaN(currentNum)) {
-          // Fall back to single version
-          this.versions.push({ name: current, order: 1 });
-          this.versionMap.set(current, 1);
-          this.reverseMap.set(1, current);
-          return;
-        }
-        for (let i = 1; i <= currentNum; i++) {
-          const name = `${prefix}${i}`;
-          this.versions.push({ name, order: i });
-          this.versionMap.set(name, i);
-          this.reverseMap.set(i, name);
-        }
-        break;
-      }
-      case 'numeric': {
-        const currentNum = parseInt(current, 10);
-        if (isNaN(currentNum)) {
-          this.versions.push({ name: current, order: 1 });
-          this.versionMap.set(current, 1);
-          this.reverseMap.set(1, current);
-          return;
-        }
-        for (let i = 1; i <= currentNum; i++) {
-          const name = String(i);
-          this.versions.push({ name, order: i });
-          this.versionMap.set(name, i);
-          this.reverseMap.set(i, name);
-        }
-        break;
-      }
-      case 'date-monthly': {
-        const versions = generateDateVersions(current, 'monthly', formatCfg.dateFormat);
-        versions.forEach((v, i) => {
-          const order = i + 1;
-          this.versions.push({ name: v, order });
-          this.versionMap.set(v, order);
-          this.reverseMap.set(order, v);
+  constructor(
+    config: VersionsConfig | undefined,
+    private current: string,
+  ) {
+    if (!config) this.add({ name: current, order: 1 });
+    else if (Array.isArray(config)) {
+      const orders = new Set<number>();
+      for (const [index, version] of [...config].sort((a, b) => a.order - b.order).entries()) {
+        if (!Number.isFinite(version.order) || orders.has(version.order))
+          throw new Error(`Invalid or duplicate version order: ${version.order}`);
+        orders.add(version.order);
+        this.add({
+          ...version,
+          order: index + 1,
+          ...(version.aliases ? { aliases: [...version.aliases] } : {}),
         });
-        break;
+        for (const alias of version.aliases ?? []) this.addAlias(alias, version.name);
       }
-      case 'date-daily': {
-        const versions = generateDateVersions(current, 'daily', formatCfg.dateFormat);
-        versions.forEach((v, i) => {
-          const order = i + 1;
-          this.versions.push({ name: v, order });
-          this.versionMap.set(v, order);
-          this.reverseMap.set(order, v);
-        });
-        break;
+    } else if ('preset' in config) {
+      this.addRange(generateDateVersions(current, 'YYYY-MM-DD', config.start, config.end));
+    } else if (config.format === 'custom') {
+      const parsed = config.parse(current);
+      if (!Number.isSafeInteger(parsed.order) || parsed.order < 1)
+        throw new Error('Custom version order must be a positive safe integer');
+      this.customCompare = config.compare;
+      this.add({ name: current, order: parsed.order });
+    } else {
+      for (const [alias, target] of Object.entries(config.aliases ?? {}))
+        this.addAlias(alias, target);
+      if (config.format === 'semantic' || config.format === 'numeric') {
+        const prefix = config.format === 'semantic' ? (config.prefix ?? 'v') : '';
+        const numeric = current.startsWith(prefix) ? current.slice(prefix.length) : '';
+        const count = Number(numeric);
+        if (
+          !/^[1-9]\d*$/.test(numeric) ||
+          !Number.isSafeInteger(count) ||
+          count > MAX_GENERATED_VERSIONS
+        ) {
+          throw new Error(
+            `Invalid ${config.format} current version: "${current}". Use an explicit version list for large or custom ranges.`,
+          );
+        }
+        for (let order = 1; order <= count; order++) this.add({ name: `${prefix}${order}`, order });
+      } else {
+        const format =
+          config.format === 'calver'
+            ? (config.calverFormat ?? 'YYYY.MM')
+            : (config.dateFormat ?? (config.format === 'date-monthly' ? 'YYYY-MM' : 'YYYY-MM-DD'));
+        if (format.includes('DD') !== (config.format === 'date-daily'))
+          throw new Error(`Invalid date format for ${config.format}: "${format}"`);
+        this.addRange(generateDateVersions(current, format, config.start, config.end));
       }
-      case 'calver': {
-        const versions = generateDateVersions(current, 'monthly', formatCfg.calverFormat);
-        versions.forEach((v, i) => {
-          const order = i + 1;
-          this.versions.push({ name: v, order });
-          this.versionMap.set(v, order);
-          this.reverseMap.set(order, v);
-        });
-        break;
-      }
-      default:
-        this.versions.push({ name: current, order: 1 });
-        this.versionMap.set(current, 1);
-        this.reverseMap.set(1, current);
-        break;
     }
-  }
-
-  /**
-   * Initialize from a list of explicit version definitions.
-   */
-  private initFromList(list: VersionDefinition[], _current: string): void {
-    const sorted = [...list].sort((a, b) => a.order - b.order);
-    let order = 1;
-    for (const v of sorted) {
-      const def: VersionDefinition = { ...v, order };
-      this.versions.push(def);
-      this.versionMap.set(def.name, order);
-      this.reverseMap.set(order, def.name);
-      order++;
+    for (const [alias, target] of this.aliasMap) {
+      if (alias === target && this.versionMap.has(alias)) {
+        this.aliasMap.delete(alias);
+        continue;
+      }
+      if (this.versionMap.has(alias) && alias !== target)
+        throw new Error(`Alias "${alias}" conflicts with a version name`);
+      const seen = new Set([alias]);
+      let resolved = target;
+      while (this.aliasMap.has(resolved)) {
+        if (seen.has(resolved)) throw new Error(`Circular version alias: "${alias}"`);
+        seen.add(resolved);
+        resolved = this.aliasMap.get(resolved)!;
+      }
+      if (!this.versionMap.has(resolved))
+        throw new Error(`Alias "${alias}" targets unknown version "${resolved}"`);
+      this.aliasMap.set(alias, resolved);
     }
+    for (const version of this.versions) {
+      if (version.aliases) Object.freeze(version.aliases);
+      Object.freeze(version);
+    }
+    Object.freeze(this.versions);
   }
 
-  /**
-   * Initialize with Stripe preset (date-daily with YYYY-MM-DD).
-   */
-  private initStripe(current: string): void {
-    const versions = generateDateVersions(current, 'daily');
-    versions.forEach((v, i) => {
-      const order = i + 1;
-      this.versions.push({ name: v, order });
-      this.versionMap.set(v, order);
-      this.reverseMap.set(order, v);
-    });
+  private add(version: VersionDefinition): void {
+    if (!version.name || this.versionMap.has(version.name))
+      throw new Error(`Empty or duplicate version name: "${version.name}"`);
+    this.versions.push(version);
+    this.versionMap.set(version.name, version.order);
+    this.reverseMap.set(version.order, version.name);
   }
 
-  /**
-   * Initialize with custom parse/format functions.
-   */
-  private initCustom(
-    cfg: {
-      parse: (v: string) => { order: number; label: string };
-      formatVersion: (v: any) => string;
-      compare?: (a: string, b: string) => number;
-    },
-    current: string,
-  ): void {
-    this.customCompare = cfg.compare;
-
-    const parsed = cfg.parse(current);
-    this.versions.push({ name: current, order: parsed.order });
-    this.versionMap.set(current, parsed.order);
-    this.reverseMap.set(parsed.order, current);
+  private addRange(names: string[]): void {
+    for (const [index, name] of names.entries()) this.add({ name, order: index + 1 });
   }
 
-  /**
-   * Convert an external version name to its internal order index (1-based).
-   * Returns `null` if the version is unknown.
-   *
-   * @param external - The version string to normalize (e.g., `"v2"`, `"2024-01-15"`)
-   * @returns The 1-based order index, or `null` if unknown
-   */
+  private addAlias(alias: string, target: string): void {
+    if (!alias || (this.aliasMap.has(alias) && this.aliasMap.get(alias) !== target))
+      throw new Error(`Empty or duplicate version alias: "${alias}"`);
+    this.aliasMap.set(alias, target);
+  }
+
   normalize(external: string): number | null {
-    // Check aliases first
-    const resolved = this.resolveAlias(external);
-    return this.versionMap.get(resolved) ?? null;
+    return this.versionMap.get(this.resolveAlias(external)) ?? null;
   }
 
-  /**
-   * Convert an internal order index back to the external version name.
-   * Returns `null` if the index is unknown.
-   *
-   * @param internal - The 1-based order index
-   * @returns The external version string, or `null` if unknown
-   */
   denormalize(internal: number): string | null {
     return this.reverseMap.get(internal) ?? null;
   }
 
-  /**
-   * Compare two version strings.
-   * Returns a negative number if `a < b`, positive if `a > b`, or `0` if equal.
-   *
-   * @throws If either version string is invalid
-   */
   compare(a: string, b: string): number {
-    if (this.customCompare) {
-      return this.customCompare(a, b);
-    }
-
-    const aOrder = this.normalize(a);
-    const bOrder = this.normalize(b);
-
-    if (aOrder === null) {
-      throw new Error(`Invalid version: "${a}"`);
-    }
-    if (bOrder === null) {
-      throw new Error(`Invalid version: "${b}"`);
-    }
-
-    return aOrder - bOrder;
+    if (this.customCompare) return this.customCompare(a, b);
+    const first = this.normalize(a);
+    const second = this.normalize(b);
+    if (first === null) throw new Error(`Invalid version: "${a}"`);
+    if (second === null) throw new Error(`Invalid version: "${b}"`);
+    return first - second;
   }
 
-  /**
-   * Sort an array of version strings in ascending order (oldest first).
-   *
-   * @throws If any version string is invalid
-   */
   sort(versions: string[]): string[] {
     return [...versions].sort((a, b) => this.compare(a, b));
   }
 
-  /**
-   * Get the current version name.
-   */
   getCurrentVersion(): string {
-    return this.versions[this.versions.length - 1]?.name ?? '';
+    return this.resolveAlias(this.current);
   }
 
-  /**
-   * Resolve an alias to its target version name.
-   * Returns the alias itself if it is not found in the alias map.
-   *
-   * @param version - The version string or alias to resolve
-   * @returns The resolved version name
-   */
   resolveAlias(version: string): string {
     return this.aliasMap.get(version) ?? version;
   }
 
-  /**
-   * Check if a version string is valid (known to the normalizer).
-   *
-   * @param version - The version string to check
-   * @returns `true` if the version is known
-   */
   isValid(version: string): boolean {
-    const resolved = this.resolveAlias(version);
-    return this.versionMap.has(resolved);
+    return this.normalize(version) !== null;
   }
 
-  /**
-   * Get the current version's internal order index.
-   */
   getCurrentOrder(): number {
-    return this.versions.length;
+    return this.normalize(this.current) ?? 0;
   }
 
-  /**
-   * Get a read-only list of all version definitions.
-   */
   listVersions(): readonly VersionDefinition[] {
     return this.versions;
   }
 }
 
-/**
- * Generate date-based version strings from a start date to the current date.
- *
- * For 'monthly': generates YYYY-MM from the earliest reasonable start to current.
- * For 'daily': generates YYYY-MM-DD from the earliest reasonable start to current.
- *
- * Without an explicit start date in config, we use a 12-month lookback window
- * (the current month minus 12 months for monthly, or the current date minus 365
- * days for daily) as a reasonable default.
- */
 function generateDateVersions(
   current: string,
-  granularity: 'monthly' | 'daily',
-  originalFormat?: string,
+  format: string,
+  start?: string,
+  end?: string,
 ): string[] {
-  // Normalize calver dot notation to ISO format for parsing
-  const normalized = current.replace(/\./g, '-');
-  const currentDate = new Date(normalized);
-  if (isNaN(currentDate.getTime())) {
-    return [current];
+  const tokens: string[] = format.match(/YYYY|MM|DD/g) ?? [];
+  if (
+    tokens.filter((token) => token === 'YYYY').length !== 1 ||
+    tokens.filter((token) => token === 'MM').length !== 1 ||
+    tokens.filter((token) => token === 'DD').length > 1 ||
+    /[a-z]/i.test(format.replace(/YYYY|MM|DD/g, ''))
+  ) {
+    throw new Error(`Unsupported date format: "${format}"`);
   }
-
-  // Determine date separator: dash for standard, dot for calver
-  const sep = originalFormat?.includes('.') ? '.' : '-';
-
+  const daily = tokens.includes('DD');
+  const pattern = new RegExp(
+    `^${format
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/YYYY/g, '(\\d{4})')
+      .replace(/MM|DD/g, '(\\d{2})')}$`,
+  );
+  const parse = (value: string): Date => {
+    const match = pattern.exec(value);
+    const year = Number(match?.[tokens.indexOf('YYYY') + 1]);
+    const month = Number(match?.[tokens.indexOf('MM') + 1]);
+    const day = daily ? Number(match?.[tokens.indexOf('DD') + 1]) : 1;
+    const date = new Date(0);
+    date.setUTCFullYear(year, month - 1, day);
+    if (
+      !match ||
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    )
+      throw new Error(`Invalid date version: "${value}"`);
+    return date;
+  };
+  const currentDate = parse(current);
+  const endDate = end ? parse(end) : currentDate;
+  const startDate = start ? parse(start) : new Date(currentDate);
+  if (!start) {
+    if (daily) startDate.setUTCDate(startDate.getUTCDate() - 365);
+    else startDate.setUTCMonth(startDate.getUTCMonth() - 12);
+  }
+  if (startDate > currentDate || endDate < currentDate)
+    throw new Error('Date range must contain the current version');
   const versions: string[] = [];
-  const isMonthly = granularity === 'monthly';
-
-  // Start from 12 months / 365 days back
-  const start = new Date(currentDate);
-  if (isMonthly) {
-    start.setMonth(start.getMonth() - 12);
-    start.setDate(1);
-  } else {
-    start.setDate(start.getDate() - 365);
+  for (const cursor = new Date(startDate); cursor <= endDate; ) {
+    if (versions.length === MAX_GENERATED_VERSIONS)
+      throw new Error(
+        'Date range exceeds 10000 versions; use an explicit version list for sparse releases',
+      );
+    versions.push(
+      format.replace(/YYYY|MM|DD/g, (token) =>
+        token === 'YYYY'
+          ? String(cursor.getUTCFullYear()).padStart(4, '0')
+          : String(token === 'MM' ? cursor.getUTCMonth() + 1 : cursor.getUTCDate()).padStart(
+              2,
+              '0',
+            ),
+      ),
+    );
+    if (daily) cursor.setUTCDate(cursor.getUTCDate() + 1);
+    else cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
-
-  const cursor = new Date(start);
-  while (cursor <= currentDate) {
-    if (isMonthly) {
-      const y = cursor.getFullYear();
-      const m = String(cursor.getMonth() + 1).padStart(2, '0');
-      versions.push(`${y}${sep}${m}`);
-      cursor.setMonth(cursor.getMonth() + 1);
-    } else {
-      const y = cursor.getFullYear();
-      const m = String(cursor.getMonth() + 1).padStart(2, '0');
-      const d = String(cursor.getDate()).padStart(2, '0');
-      versions.push(`${y}${sep}${m}${sep}${d}`);
-      cursor.setDate(cursor.getDate() + 1);
-    }
-  }
-
   return versions;
 }

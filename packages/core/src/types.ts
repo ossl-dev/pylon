@@ -13,6 +13,7 @@ export interface VersionDefinition {
   deprecated?: boolean;
   sunsetDate?: string;
   migrationGuide?: string;
+  aliases?: string[];
 }
 
 export type SchemaMap = Record<string, z.ZodTypeAny>;
@@ -96,6 +97,8 @@ export interface DebugConfig {
 
 export interface StripePreset {
   preset: 'stripe';
+  start?: string;
+  end?: string;
 }
 
 export interface CustomVersionsConfig {
@@ -112,6 +115,8 @@ export type VersionsConfig =
       dateFormat?: string;
       calverFormat?: string;
       aliases?: Record<string, string>;
+      start?: string;
+      end?: string;
     }
   | VersionDefinition[]
   | StripePreset

@@ -2,16 +2,20 @@ import type { PylonConfig, VersionDefinition } from '@ossl/pylon-core';
 import { VersionNormalizer } from '@ossl/pylon-core';
 import { loadPylonConfig, writeConfig } from '../load-config.js';
 
-/**
- * Ensure the config has an explicit versions array.
- * If `config.versions` is already an array it is returned.
- * If it is a format/preset definition, a flat array is derived from the
- * config's current version (single entry).
- */
+/** Expand formats while preserving every supported version. */
 export function ensureVersionsArray(config: PylonConfig): VersionDefinition[] {
-  return new VersionNormalizer(config.versions, config.current)
-    .listVersions()
-    .map((version) => ({ ...version }));
+  const normalizer = new VersionNormalizer(config.versions, config.current);
+  const versions = normalizer.listVersions().map((version) => ({
+    ...version,
+    ...(version.aliases ? { aliases: [...version.aliases] } : {}),
+  }));
+  if (config.versions && !Array.isArray(config.versions) && 'aliases' in config.versions) {
+    for (const [alias, target] of Object.entries(config.versions.aliases ?? {})) {
+      const version = versions.find((version) => version.name === normalizer.resolveAlias(target));
+      if (version) version.aliases = [...(version.aliases ?? []), alias];
+    }
+  }
+  return versions;
 }
 
 /**

@@ -1,3 +1,6 @@
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { VersionNormalizer } from './version-normalizer.js';
 
@@ -253,4 +256,132 @@ describe('VersionNormalizer', () => {
       expect(n.denormalize(2)).toBe('2');
     });
   });
+});
+
+describe('date ranges and aliases', () => {
+  it('generates an explicit daily range including leap day', () => {
+    const normalizer = new VersionNormalizer(
+      { format: 'date-daily', start: '2024-02-28', end: '2024-03-01' },
+      '2024-02-29',
+    );
+    expect(normalizer.listVersions().map((version) => version.name)).toEqual([
+      '2024-02-28',
+      '2024-02-29',
+      '2024-03-01',
+    ]);
+    expect(normalizer.getCurrentVersion()).toBe('2024-02-29');
+    expect(normalizer.getCurrentOrder()).toBe(2);
+  });
+
+  it('generates monthly and CalVer ranges with their requested separators', () => {
+    expect(
+      new VersionNormalizer({ format: 'date-monthly', start: '2023-12' }, '2024-02')
+        .listVersions()
+        .map((version) => version.name),
+    ).toEqual(['2023-12', '2024-01', '2024-02']);
+    expect(
+      new VersionNormalizer({ format: 'calver', start: '2023.12' }, '2024.02')
+        .listVersions()
+        .map((version) => version.name),
+    ).toEqual(['2023.12', '2024.01', '2024.02']);
+    expect(
+      new VersionNormalizer({ preset: 'stripe', start: '2024-02-28' }, '2024-03-01').listVersions(),
+    ).toHaveLength(3);
+  });
+
+  it('supports date token ordering without relying on JavaScript date parsing', () => {
+    const normalizer = new VersionNormalizer(
+      { format: 'date-daily', dateFormat: 'DD/MM/YYYY', start: '28/02/2024' },
+      '01/03/2024',
+    );
+    expect(normalizer.listVersions().map((version) => version.name)).toEqual([
+      '28/02/2024',
+      '29/02/2024',
+      '01/03/2024',
+    ]);
+  });
+
+  it('rejects impossible dates, reversed ranges, and unbounded generation', () => {
+    expect(() => new VersionNormalizer({ format: 'date-daily' }, '2024-02-31')).toThrow(
+      'Invalid date',
+    );
+    expect(() => new VersionNormalizer({ format: 'date-monthly' }, '2024-13')).toThrow(
+      'Invalid date',
+    );
+    expect(
+      () => new VersionNormalizer({ format: 'date-daily', start: '2024-03-02' }, '2024-03-01'),
+    ).toThrow('must contain');
+    expect(() => new VersionNormalizer({ format: 'semantic' }, 'v999999999')).toThrow(
+      'explicit version list',
+    );
+    expect(() => new VersionNormalizer({ format: 'semantic' }, 'v2beta')).toThrow(
+      'Invalid semantic',
+    );
+  });
+
+  it('resolves aliases for explicit labels and alias chains', () => {
+    const normalizer = new VersionNormalizer(
+      [
+        { name: 'legacy', order: 10, aliases: ['v1', 'v1.0'] },
+        { name: 'stable', order: 20 },
+      ],
+      'stable',
+    );
+    expect(normalizer.normalize('v1.0')).toBe(1);
+    expect(normalizer.resolveAlias('v1')).toBe('legacy');
+    expect(
+      new VersionNormalizer(
+        { format: 'semantic', aliases: { latest: 'stable', stable: 'v2' } },
+        'v2',
+      ).resolveAlias('latest'),
+    ).toBe('v2');
+  });
+
+  it('rejects invalid alias graphs and duplicate version definitions', () => {
+    expect(
+      () => new VersionNormalizer({ format: 'semantic', aliases: { a: 'b', b: 'a' } }, 'v2'),
+    ).toThrow('Circular version alias');
+    expect(
+      () => new VersionNormalizer({ format: 'semantic', aliases: { latest: 'v99' } }, 'v2'),
+    ).toThrow('unknown version');
+    expect(
+      () =>
+        new VersionNormalizer(
+          [
+            { name: 'a', order: 1 },
+            { name: 'a', order: 2 },
+          ],
+          'a',
+        ),
+    ).toThrow('duplicate version name');
+    expect(
+      () =>
+        new VersionNormalizer(
+          [
+            { name: 'a', order: 1 },
+            { name: 'b', order: 1 },
+          ],
+          'b',
+        ),
+    ).toThrow('duplicate version order');
+  });
+});
+
+it('generates the same daily versions across UTC offsets and DST boundaries', () => {
+  const module = pathToFileURL(resolve('dist/version-normalizer.js')).href;
+  const script = `import { VersionNormalizer } from ${JSON.stringify(module)};
+    console.log(JSON.stringify(new VersionNormalizer({ format: 'date-daily', start: '2024-03-09' }, '2024-03-12').listVersions()));`;
+  for (const timezone of ['UTC', 'America/Los_Angeles', 'Asia/Kolkata']) {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, TZ: timezone },
+      encoding: 'utf8',
+    });
+    expect(child.status).toBe(0);
+    expect(JSON.parse(child.stdout).map((version: { name: string }) => version.name)).toEqual([
+      '2024-03-09',
+      '2024-03-10',
+      '2024-03-11',
+      '2024-03-12',
+    ]);
+  }
 });

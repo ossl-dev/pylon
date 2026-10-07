@@ -866,3 +866,11 @@ describe('createTestPayload', () => {
     });
   });
 });
+
+it('preserves format aliases when converting a config to an explicit version list', () => {
+  const versions = ensureVersionsArray(
+    baseConfig({ versions: { format: 'semantic', aliases: { old: 'v1', latest: 'v2' } } }),
+  );
+  expect(versions[0]?.aliases).toEqual(['old']);
+  expect(versions[1]?.aliases).toEqual(['latest']);
+});

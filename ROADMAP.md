@@ -12,7 +12,7 @@ Stuff that's built but not finished, tested, or released.
 
 ### Tests
 
-Core and transforms are well-tested. The rest needs coverage.
+All packages have unit coverage; the adapters also share a contract suite.
 
 - [x] Add unit tests for `@ossl/pylon-koa` — middleware, shadow mode, error paths
 - [x] Add unit tests for `@ossl/pylon-next` — route handler wrapper, request passthrough
@@ -49,11 +49,11 @@ The `apps/docs/` directory is empty. The README is solid but there's no referenc
 
 ### CI / infra
 
-No CI exists yet.
+CI runs build, lint, typecheck, tests, and a dependency audit.
 
 - [x] Set up GitHub Actions — lint, typecheck, test on push and PR
-- [x] Add test matrix for Node 18/20/22 and Bun 1.x
-- [x] Add CI badge matrix to README (one per package)
+- [x] Add test matrix for supported Node 22/24 and Bun 1.x
+- [ ] Add CI badge matrix to README (one per package)
 - [x] Add dependency audit step (bun audit or npm audit)
 - [x] Add Biome format + lint check in CI (currently configured but not enforced)
 - [ ] Add Changesets release workflow — publish to npm on merge to main
@@ -92,8 +92,8 @@ Make the engine faster, safer, more flexible.
 
 ### Version normalizer
 
-- [ ] Full date format support — generate all versions between `start` and `end` for `date-daily` and `date-monthly`
-- [ ] Custom label ordering with aliases — allow `v1`, `v1.0`, `v1.0.0` to all map to the same version
+- [x] Full date format support — generate UTC ranges between `start` and `end` for daily, monthly, CalVer, and Stripe formats
+- [x] Custom label ordering with aliases — explicit definitions accept aliases; alias chains are validated
 - [ ] Version sunset automation — auto-deprecate versions past their sunset date
 - [ ] Support non-linear version graphs — branches (e.g. `v1` → `v2`, but also `v1` → `v1-experimental`)
 
@@ -230,15 +230,15 @@ Longer-term, research-heavy items. Don't need to start soon, but worth thinking 
 Not triaged into phases. Fix anytime.
 
 - [ ] **Express adapter monkey-patches `res.json`/`res.send`/`res.end`** — works but fragile. Interceptors are restored after each response, but concurrent requests or middleware that caches `res` methods will break.
-- [ ] **Webhook `signPayload` is not cryptographically secure** — uses a simple hash instead of HMAC-SHA256. Marked with a code comment, needs real implementation before any production use.
-- [ ] **Date format version normalizers return a single version** — `date-daily`, `date-monthly`, `calver`, and Stripe preset don't generate version ranges. They should compute all versions between `start` and the current date.
-- [ ] **TypeScript version mismatch** — root `package.json` has TS 6.0.3, all packages have 5.8.3. Builds work but tooling gets confused.
-- [ ] **Vitest version mismatch** — `@ossl/pylon-devtools` uses vitest 3.1.2, everything else uses 4.1.8.
-- [ ] **Biome `$schema` references version 1.9.4** but the project uses Biome 2.5.0. `biome check` works but the schema is stale.
-- [ ] **No `engines` field in any package.json** — should document minimum Node.js and Bun versions.
-- [ ] **`@ossl/pylon-next` only supports App Router** — Pages Router is not documented or tested. Either add support or explicitly state it's App Router only.
-- [ ] **Transform engine error strategy `log-and-continue`** — logs to console by default. Should accept a custom logger so it integrates with existing logging setups.
-- [ ] **Version detector path parsing** — path pattern `/v:version/` only matches a single segment. Nested paths like `/api/v1/users` work but `/api/v1/` with trailing config won't match if there's extra structure.
+- [x] **Webhook signing** — HMAC-SHA256 via Web Crypto.
+- [x] **Date format normalizers** — UTC ranges with explicit bounds and calendar validation.
+- [x] **TypeScript version mismatch** — every package uses 6.x.
+- [x] **Vitest version mismatch** — every package uses 4.1.8.
+- [x] **Biome configuration** — v2 schema and shared settings wired into package lint commands.
+- [x] **Package engines** — minimum Node versions declared; the CLI requires 22.12+.
+- [x] **Next.js scope** — documented as an App Router adapter. Pages Router support remains unimplemented.
+- [ ] **Transform engine error strategy `log-and-continue`** — add a default logger when no `onTransformError` callback is supplied.
+- [x] **Version detector path parsing** — match complete segments, handle nested paths and trailing slashes, and support global custom patterns.
 - [ ] **No request body size limit handling** — if a request body is very large, the transform engine will buffer it entirely in memory. Add streaming or size limits.
 - [ ] **Shadow mode logs full request/response bodies** — potential data leak in production if turned on accidentally. Add body redaction or truncation.
 

@@ -29,7 +29,8 @@
   "devDependencies": {
     "typescript": "^6.0.3",
     "vitest": "^4.1.8",
-    "@ossl/pylon-transforms": "workspace:*"
+    "@ossl/pylon-transforms": "workspace:*",
+    "@types/node": "^25.9.3"
   },
   "publishConfig": {
     "access": "public"

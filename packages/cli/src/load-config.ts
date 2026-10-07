@@ -114,6 +114,7 @@ function formatVersionDef(v: VersionDefinition, indent: string): string {
     parts.push('deprecated: true');
   }
   if (v.sunsetDate) parts.push(`sunsetDate: ${JSON.stringify(v.sunsetDate)}`);
+  if (v.aliases) parts.push(`aliases: ${JSON.stringify(v.aliases)}`);
   if (v.migrationGuide) parts.push(`migrationGuide: ${JSON.stringify(v.migrationGuide)}`);
   return `${indent}{ ${parts.join(', ')} }`;
 }
@@ -239,7 +240,10 @@ export function serializeVersions(versions: VersionsConfig): string[] {
   }
 
   if ('preset' in versions && versions.preset === 'stripe') {
-    lines.push('  versions: { preset: "stripe" },');
+    const fields = ['preset: "stripe"'];
+    if (versions.start) fields.push(`start: ${JSON.stringify(versions.start)}`);
+    if (versions.end) fields.push(`end: ${JSON.stringify(versions.end)}`);
+    lines.push(`  versions: { ${fields.join(', ')} },`);
     return lines;
   }
 
@@ -254,6 +258,8 @@ export function serializeVersions(versions: VersionsConfig): string[] {
     if (v.prefix) fields.push(`prefix: ${JSON.stringify(v.prefix)}`);
     if (v.dateFormat) fields.push(`dateFormat: ${JSON.stringify(v.dateFormat)}`);
     if (v.calverFormat) fields.push(`calverFormat: ${JSON.stringify(v.calverFormat)}`);
+    if (v.start) fields.push(`start: ${JSON.stringify(v.start)}`);
+    if (v.end) fields.push(`end: ${JSON.stringify(v.end)}`);
     if (v.aliases) fields.push(`aliases: ${JSON.stringify(v.aliases)}`);
     lines.push(`  versions: { ${fields.join(', ')} },`);
     return lines;

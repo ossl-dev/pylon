@@ -27,12 +27,11 @@ Client (v2)
   -> Request Transform: v2 -> v4 (fills in defaults)
   -> Schema Validation: v4
   -> Controller (only knows v4)
-  -> Schema Validation: v4 response
   -> Response Transform: v4 -> v2
   -> Client (v2)
 ```
 
-Requests on the current version pay zero overhead. The identity function is inlined by V8. Legacy versions pay roughly 0.1ms per transform hop. Predictable, bounded, negligible.
+Requests on the current version skip the transform chain. Historical versions run cached adjacent transforms; latency depends on the functions you provide.
 
 ---
 
@@ -40,12 +39,17 @@ Requests on the current version pay zero overhead. The identity function is inli
 
 ```typescript
 import { Pylon } from '@ossl/pylon-core';
+import { defaults, drop } from '@ossl/pylon-transforms';
 import { z } from 'zod';
 
 const pylon = new Pylon({
   current: 'v4',
   defaultVersion: 'v4',
-  versions: { format: 'semantic' },
+  versions: [
+    { name: 'v2', order: 1 },
+    { name: 'v3', order: 2 },
+    { name: 'v4', order: 3 },
+  ],
 
   schemas: {
     v2: z.object({
@@ -97,7 +101,7 @@ const pylon = new Pylon({
 });
 ```
 
-When you change the v4 schema, TypeScript forces you to update every transform that touches v4. You cannot break an old API version without the compiler stopping you.
+Schemas validate upgraded request bodies at runtime. Use contract tests to check that transforms preserve the behavior expected by historical clients.
 
 ---
 
@@ -160,9 +164,9 @@ fastify.register(pylonFastify, { pylon });
 import { pylonKoa } from '@ossl/pylon-koa';
 app.use(pylonKoa(pylon));
 
-// Next.js
+// Next.js App Router
 import { pylonNext } from '@ossl/pylon-next';
-export default pylonNext(pylon)(handler);
+export const POST = pylonNext(pylon)(handler);
 ```
 
 The Express adapter monkey patches `res.json`/`res.send`/`res.end`. It works but is inherently fragile. For new projects, Hono and Fastify provide clean, supported interception hooks.
@@ -174,7 +178,9 @@ The Express adapter monkey patches `res.json`/`res.send`/`res.end`. It works but
 Pylon versions webhooks using the same transform engine. Register a webhook endpoint with its version:
 
 ```typescript
-import { pylonWebhook } from '@ossl/pylon-webhooks';
+import { PylonWebhook } from '@ossl/pylon-webhooks';
+
+const pylonWebhook = new PylonWebhook(pylon);
 
 await pylonWebhook.register({
   url: 'https://customer.com/webhook',
@@ -199,8 +205,8 @@ Write tests once against the current version. Pylon runs them against every hist
 ```typescript
 import { timeTravel } from '@ossl/pylon-testing';
 
-describe('POST /users', () => {
-  timeTravel(pylon, async (version, request) => {
+it('POST /users works across versions', async () => {
+  await timeTravel(pylon, async (version, request) => {
     const response = await request('POST', '/users', {
       body: { fullName: 'John Doe', email: 'john@example.com', address: { ... } },
     });
@@ -224,23 +230,16 @@ pylon audit ./src                   Analyze code for version patterns
 pylon diff v3 v4                    Show changelog
 pylon generate openapi              Generate OpenAPI spec
 pylon playground                    Transform Playground web UI
-pylon bench v2->v4                  Benchmark transform performance
+pylon bench v2 v4                  Benchmark transform performance
 ```
 
 ---
 
 ## Observability
 
-OpenTelemetry metrics built in:
+Use `observability.onTransform`, `observability.onError`, and `onTransformError` to connect your metrics and logging.
 
-| Metric | Description |
-|--------|-------------|
-| `pylon.requests.total` | Request count by version, endpoint, method |
-| `pylon.transform.duration` | Transform latency by source, target |
-| `pylon.transform.errors` | Transform failures by error type |
-| `pylon.validation.errors` | Schema validation failures |
-
-Debug headers injected in development mode show the full transform trace.
+Set `debug.enabled` to include transform traces in processing results. The debug header indicates that this mode is enabled.
 
 ---
 
@@ -260,7 +259,7 @@ Link: <https://docs.example.com/migrate-v2-to-v4>; rel="deprecation"
 
 ## Migration
 
-Adopt Pylon on an existing API in 5 phases:
+The planned migration workflow has 5 phases. Audit is available; scaffolding and the playground remain unfinished:
 
 1. **Audit**: `pylon audit ./src` finds all versioning patterns in your codebase
 2. **Scaffold**: `pylon scaffold ./src` generates initial config and transforms
@@ -276,8 +275,8 @@ No big bang migrations. No rewrites.
 
 Three pillars:
 
-* **Schemas**: Runtime validation via Zod (primary), with adapters for TypeBox, Valibot, ArkType. TypeScript types inferred from schemas. OpenAPI spec generation.
-* **Transforms**: Pure functions that convert between versions. Graph compilation at startup. Function composition and memoization. Roughly 0.1ms per hop. Async transforms supported with startup warnings.
+* **Schemas**: Runtime request validation with Zod and OpenAPI spec generation.
+* **Transforms**: Functions that convert between adjacent versions. Execution steps and composed functions are cached per engine. Synchronous and asynchronous functions are supported.
 * **Adapters**: Framework specific request and response interception.
 
 ---
