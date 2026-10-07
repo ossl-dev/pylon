@@ -41,10 +41,16 @@ function generateId(): string {
  * });
  * ```
  */
+export interface WebhookOptions {
+  /** Maximum retained deliveries for replay. Defaults to 1000; zero disables history. */
+  historyLimit?: number;
+}
+
 export class PylonWebhook {
+  private historyLimit: number;
   private pylon: Pylon;
   private store: RegistrationStore;
-  private history: Map<string, WebhookEvent>;
+  private history: Map<string, { event: WebhookEvent; sourcePayload: Record<string, unknown> }>;
 
   /**
    * Maps registration IDs to active migration state.
@@ -59,7 +65,10 @@ export class PylonWebhook {
    * @param pylon - A configured Pylon instance used for payload transformation
    * @param store - Optional custom registration store; a default in-memory store is created if omitted
    */
-  constructor(pylon: Pylon, store?: RegistrationStore) {
+  constructor(pylon: Pylon, store?: RegistrationStore, options: WebhookOptions = {}) {
+    this.historyLimit = options.historyLimit ?? 1000;
+    if (!Number.isSafeInteger(this.historyLimit) || this.historyLimit < 0)
+      throw new Error('historyLimit must be a non-negative safe integer');
     this.pylon = pylon;
     this.store = store ?? new RegistrationStore();
     this.history = new Map();
@@ -180,11 +189,12 @@ export class PylonWebhook {
    * ```
    */
   async replay(eventId: string, targetVersion: string): Promise<WebhookResult[]> {
-    const event = this.history.get(eventId);
-    if (!event) {
+    const record = this.history.get(eventId);
+    if (!record) {
       throw new Error(`Webhook event not found: ${eventId}`);
     }
 
+    const event = record.event;
     // Find current registrations for this event
     const registrations = this.store.findByEvent(event.event);
     const results: WebhookResult[] = [];
@@ -195,7 +205,7 @@ export class PylonWebhook {
         registration,
         id,
         event.event,
-        event.payload,
+        record.sourcePayload,
         targetVersion,
         idempotencyKey,
       );
@@ -213,10 +223,10 @@ export class PylonWebhook {
    */
   getHistory(eventId?: string): WebhookEvent[] {
     if (eventId) {
-      const event = this.history.get(eventId);
-      return event ? [event] : [];
+      const record = this.history.get(eventId);
+      return record ? [structuredClone(record.event)] : [];
     }
-    return Array.from(this.history.values());
+    return Array.from(this.history.values(), (record) => structuredClone(record.event));
   }
 
   /**
@@ -294,7 +304,7 @@ export class PylonWebhook {
           const timestamp = new Date();
           const durationMs = Date.now() - startTime;
 
-          this.recordEvent(event, version, payload, registrationId);
+          this.recordEvent(event, version, payload, registrationId, payload);
 
           return {
             status: 0,
@@ -308,7 +318,7 @@ export class PylonWebhook {
         const timestamp = new Date();
         const durationMs = Date.now() - startTime;
 
-        this.recordEvent(event, version, payload, registrationId);
+        this.recordEvent(event, version, payload, registrationId, payload);
 
         return {
           status: 0,
@@ -357,7 +367,7 @@ export class PylonWebhook {
     const durationMs = Date.now() - startTime;
 
     // Record in history
-    this.recordEvent(event, version, transformedPayload, registrationId);
+    this.recordEvent(event, version, transformedPayload, registrationId, payload);
 
     return {
       status,
@@ -370,7 +380,14 @@ export class PylonWebhook {
   /**
    * Store a webhook event in the history log.
    */
-  private recordEvent(event: string, version: string, payload: any, registrationId: string): void {
+  private recordEvent(
+    event: string,
+    version: string,
+    payload: unknown,
+    registrationId: string,
+    sourcePayload: Record<string, unknown>,
+  ): void {
+    if (this.historyLimit === 0) return;
     const eventRecord: WebhookEvent = {
       id: generateId(),
       event,
@@ -379,7 +396,14 @@ export class PylonWebhook {
       timestamp: new Date(),
       registrationId,
     };
-    this.history.set(eventRecord.id, eventRecord);
+    this.history.set(eventRecord.id, {
+      event: structuredClone(eventRecord),
+      sourcePayload: structuredClone(sourcePayload),
+    });
+    if (this.history.size > this.historyLimit) {
+      const oldest = this.history.keys().next().value;
+      if (oldest !== undefined) this.history.delete(oldest);
+    }
   }
 
   /**

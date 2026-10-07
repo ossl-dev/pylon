@@ -317,3 +317,32 @@ describe('replay', () => {
     await expect(webhooks.replay('missing-event', 'v2')).rejects.toThrow(/not found/);
   });
 });
+
+it('replays the original current-version payload even after a lossy downgrade', async () => {
+  transformMock.mockImplementation(async (_source, target, _direction, data) => ({
+    status: 'success',
+    data: target === 'v1' ? { name: data.fullName } : data,
+  }));
+  register({ version: 'v1' });
+  const payload = { fullName: 'Ada', email: 'ada@example.com' };
+  await webhooks.send({ event: 'user.created', payload });
+  const event = webhooks.getHistory()[0];
+  if (!event) throw new Error('Missing webhook history');
+  expect(event.payload).toEqual({ name: 'Ada' });
+  payload.email = 'changed@example.com';
+  fetchMock.mockClear();
+  await webhooks.replay(event.id, 'v2');
+  expect(sentBodies()[0].payload).toEqual({ fullName: 'Ada', email: 'ada@example.com' });
+});
+
+it('bounds replay history and evicts the oldest deliveries', async () => {
+  webhooks = new PylonWebhook(fakePylon, store, { historyLimit: 1 });
+  register({ version: 'v2' });
+  await webhooks.send({ event: 'user.created', payload: { name: 'first' } });
+  const first = webhooks.getHistory()[0];
+  if (!first) throw new Error('Missing webhook history');
+  await webhooks.send({ event: 'user.created', payload: { name: 'second' } });
+  expect(webhooks.getHistory()).toHaveLength(1);
+  expect(webhooks.getHistory()[0]?.payload).toEqual({ name: 'second' });
+  await expect(webhooks.replay(first.id, 'v2')).rejects.toThrow('not found');
+});

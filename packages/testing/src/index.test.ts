@@ -244,10 +244,9 @@ describe('assertContract', () => {
       { name: 'John', email: 'john@example.com' },
       'request',
     );
-    // response direction: v2toV1Res applied to raw sample (not after request transform)
-    // produces { name: '' } since sample has no fullName field
+    // Response direction consumes the upgraded request.
     expect(check).toHaveBeenCalledWith(
-      { name: '', email: 'john@example.com' },
+      { name: 'John', email: 'john@example.com' },
       { name: 'John', email: 'john@example.com' },
       'response',
     );
@@ -342,7 +341,7 @@ describe('timeTravel', () => {
       'http://localhost:3000/users',
       expect.objectContaining({
         method: 'GET',
-        headers: { 'content-type': 'application/json' },
+        headers: expect.objectContaining({ 'content-type': 'application/json' }),
       }),
     );
   });
@@ -495,4 +494,33 @@ describe('snapshotVersion', () => {
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]?.version).toBe('v2');
   });
+});
+
+it('timeTravel sends the selected version on each HTTP request', async () => {
+  const pylon = createTestPylon();
+  const fetchMock = versionAwareFetchMock();
+  await timeTravel(
+    pylon,
+    async (_version, request) => {
+      await request('GET', '/users');
+    },
+    { fetch: fetchMock as typeof fetch },
+  );
+  const versions = fetchMock.mock.calls.map((call) =>
+    new Headers(call[1]?.headers).get('x-api-version'),
+  );
+  expect(versions).toEqual(['v1', 'v2']);
+});
+
+it('contract reversibility ignores object key insertion order', async () => {
+  const pylon = pylonWithPair({
+    request: (input) => input,
+    response: (input) => ({ email: input.email, name: input.name }),
+  });
+  await expect(
+    assertContract(pylon, 'v1->v2', {
+      sampleInput: { name: 'Ada', email: 'ada@example.com' },
+      reversible: true,
+    }),
+  ).resolves.toBeUndefined();
 });

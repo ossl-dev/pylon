@@ -6,4 +6,5 @@ export type {
   WebhookResult,
   WebhookSendOptions,
 } from './types.js';
+export type { WebhookOptions } from './webhook.js';
 export { PylonWebhook } from './webhook.js';

@@ -107,7 +107,7 @@ export async function timeTravel(
       let body: unknown = opts?.body;
       if (body !== undefined) {
         const result = await pylon.transform(current, version, 'response', body);
-        if (result.status === 'success' && result.data !== undefined) {
+        if (result.status !== 'error') {
           body = result.data;
         } else if (result.status === 'error') {
           throw new Error(
@@ -125,12 +125,16 @@ export async function timeTravel(
       }
 
       // 3. Build fetch init.
+      const headers = new Headers(opts?.headers);
+      headers.set('content-type', 'application/json');
+      headers.set(
+        pylon.config.versioning?.sources.find((source) => source.type === 'header')?.name ??
+          'api-version',
+        version,
+      );
       const fetchInit: RequestInit = {
         method,
-        headers: {
-          'content-type': 'application/json',
-          ...(opts?.headers ?? {}),
-        },
+        headers: Object.fromEntries(headers),
         body: body !== undefined ? JSON.stringify(body) : undefined,
       };
 
@@ -156,9 +160,11 @@ export async function timeTravel(
       //    so all assertions use the same schema.
       if (responseBody !== undefined && responseBody !== null && typeof responseBody === 'object') {
         const result = await pylon.transform(version, current, 'request', responseBody);
-        if (result.status === 'success' && result.data !== undefined) {
-          responseBody = result.data;
-        }
+        if (result.status === 'error')
+          throw new Error(
+            `[timeTravel] Failed to upgrade response from "${version}" to "${current}": ${result.error?.message ?? 'Unknown error'}`,
+          );
+        responseBody = result.data;
       }
 
       return {

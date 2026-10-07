@@ -24,7 +24,7 @@ export interface ContractAssertion {
 
   /**
    * Check that the transform is reversible:
-   * `request(response(input)) === input`.
+   * `response(request(input)) === input`.
    *
    * Requires both the `request` and `response` functions to be defined
    * on the transform pair.
@@ -193,7 +193,8 @@ export async function assertContract(
 
     for (const dir of directions) {
       const fn = pair[dir]!;
-      const transformed = await fn(sample);
+      const input = dir === 'response' && pair.request ? await pair.request(sample) : sample;
+      const transformed = await fn(input);
       const passed = await assertions.check(transformed, sample, dir);
 
       if (!passed) {
@@ -203,15 +204,24 @@ export async function assertContract(
   }
 }
 
-/**
- * Deep-compare two values by JSON serialization.
- * Throws if they differ.
- */
 function assertDeepEqual(actual: unknown, expected: unknown): void {
-  const actualJson = JSON.stringify(actual);
-  const expectedJson = JSON.stringify(expected);
-
-  if (actualJson !== expectedJson) {
+  if (Object.is(actual, expected)) return;
+  if (
+    typeof actual !== 'object' ||
+    actual === null ||
+    typeof expected !== 'object' ||
+    expected === null ||
+    Array.isArray(actual) !== Array.isArray(expected)
+  ) {
     throw new Error('Values are not deeply equal');
+  }
+  const keys = Object.keys(actual);
+  if (keys.length !== Object.keys(expected).length) throw new Error('Values are not deeply equal');
+  for (const key of keys) {
+    if (!Object.hasOwn(expected, key)) throw new Error('Values are not deeply equal');
+    assertDeepEqual(
+      (actual as Record<string, unknown>)[key],
+      (expected as Record<string, unknown>)[key],
+    );
   }
 }
