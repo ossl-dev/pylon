@@ -289,3 +289,91 @@ describe('TransformEngine', () => {
     });
   });
 });
+
+describe('transform regressions', () => {
+  it('keeps endpoint compiled transforms separate from global transforms', async () => {
+    const engine = createEngine();
+    const global = engine.compile('v1', 'v2', 'request');
+    const endpoint = engine.merge({ 'v1->v2': { request: () => ({ scoped: true }) } });
+    expect(await endpoint.compile('v1', 'v2', 'request')({})).toEqual({ scoped: true });
+    expect(await global({})).toEqual({ version: 'v2' });
+  });
+
+  it('handles aliases in both directions and canonicalizes cache entries', async () => {
+    const engine = new TransformEngine(
+      {
+        'v1->v2': {
+          request: (input: number) => input + 1,
+          response: (input: number) => input - 1,
+        },
+      },
+      {},
+      new VersionNormalizer({ format: 'semantic', aliases: { old: 'v1', latest: 'v2' } }, 'v2'),
+    );
+    expect(await engine.execute('old', 'latest', 'request', 1)).toEqual({
+      status: 'success',
+      data: 2,
+    });
+    expect(await engine.execute('latest', 'old', 'response', 2)).toEqual({
+      status: 'success',
+      data: 1,
+    });
+    expect(engine.compile('old', 'latest', 'request')).toBe(engine.compile('v1', 'v2', 'request'));
+  });
+
+  it('keeps synchronous compiled transforms synchronous and supports mixed async chains', async () => {
+    const engine = new TransformEngine(
+      {
+        'v1->v2': { request: (n: number) => n + 1 },
+        'v2->v3': { request: async (n: number) => n * 2 },
+        'v3->v4': { request: (n: number) => n + 3 },
+      },
+      {},
+      new VersionNormalizer({ format: 'semantic' }, 'v4'),
+    );
+    expect(engine.compile('v1', 'v2', 'request')(1)).toBe(2);
+    expect(await engine.compile('v1', 'v4', 'request')(1)).toBe(7);
+  });
+
+  it('awaits fallback output and runs the remaining hops', async () => {
+    const engine = new TransformEngine(
+      {
+        'v1->v2': {
+          request: () => {
+            throw null;
+          },
+          onError: { strategy: 'fallback', fallback: async () => 4 },
+        },
+        'v2->v3': { request: (n: number) => n * 2 },
+      },
+      {},
+      new VersionNormalizer({ format: 'semantic' }, 'v3'),
+    );
+    expect(await engine.execute('v1', 'v3', 'request', 1)).toEqual({ status: 'fallback', data: 8 });
+  });
+
+  it('reports one error per failed hop, including non-Error throws', async () => {
+    const engine = new TransformEngine(
+      {
+        'v1->v2': {
+          request: () => {
+            throw null;
+          },
+        },
+      },
+      {},
+      new VersionNormalizer({ format: 'semantic' }, 'v2'),
+    );
+    const errors: unknown[] = [];
+    const result = await engine.execute('v1', 'v2', 'request', {}, (error) => errors.push(error));
+    expect(errors).toHaveLength(1);
+    expect(result.error?.message).toContain('v1->v2 (request)');
+    expect(result.error?.details?.key).toBe('v1->v2');
+  });
+
+  it('rejects unknown versions even on identity chains', () => {
+    expect(() => createEngine().compile('missing', 'missing', 'request')).toThrow(
+      'Unknown source version',
+    );
+  });
+});

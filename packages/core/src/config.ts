@@ -76,6 +76,11 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
         continue;
       }
 
+      for (const direction of ['request', 'response'] as const) {
+        if (pair[direction] !== undefined && typeof pair[direction] !== 'function') {
+          errors.push(`Transform "${key}" ${direction} must be a function`);
+        }
+      }
       if (!pair.request && !pair.response) {
         errors.push(`Transform "${key}" has neither "request" nor "response" function`);
       }
@@ -146,7 +151,13 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
     }
 
     // Check current version exists
-    if (config.current && !referenced.has(config.current)) {
+    if (
+      config.current &&
+      !referenced.has(config.current) &&
+      !config.schemas?.[config.current] &&
+      !(Array.isArray(config.versions) && config.versions.some((v) => v.name === config.current)) &&
+      Object.keys(config.transforms).length > 0
+    ) {
       errors.push(`Current version "${config.current}" does not appear in any transform`);
     }
   }

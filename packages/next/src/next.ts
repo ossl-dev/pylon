@@ -35,6 +35,7 @@ export interface PylonNextOptions {
  * ```
  */
 export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
+  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   // biome-ignore lint/suspicious/noExplicitAny: decorator wrapping unknown handler signatures
   return function wrap<T extends (...args: any[]) => any>(handler: T): T {
     // biome-ignore lint/suspicious/noExplicitAny: args[0] is narrowed to NextRequest below
@@ -76,8 +77,10 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
 
       // Error from transform pipeline → return Pylon error response
       if (result.transformResult.status === 'error' && result.transformResult.error) {
-        const statusCode = result.transformResult.error.code === 'VERSION_UNPUBLISHED' ? 410 : 422;
-        return Response.json(result.transformResult.error, {
+        const statusCode =
+          result.status ??
+          (result.transformResult.error.code === 'VERSION_UNPUBLISHED' ? 410 : 422);
+        return Response.json(result.body, {
           status: statusCode,
           headers: result.headers,
         });
@@ -113,9 +116,11 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
             result.debug?.transformsApplied ?? [],
             result.debug,
           );
+          delete responseHeaders['content-length'];
+          delete responseResult.headers['content-length'];
           return new Response(JSON.stringify(responseResult.body), {
-            status: response.status,
-            statusText: response.statusText,
+            status: responseResult.status ?? response.status,
+            statusText: responseResult.status ? undefined : response.statusText,
             headers: { ...responseHeaders, ...responseResult.headers },
           });
         }
@@ -147,18 +152,12 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
  * through as-is.
  */
 function createTransformedRequest(original: NextRequest, transformedBody: unknown): NextRequest {
-  const { method } = original;
-
-  // GET/HEAD should never carry a body; when no JSON body was parsed
-  // (transformedBody === undefined), pass the original stream through.
-  const body =
-    ['GET', 'HEAD'].includes(method) || transformedBody === undefined
-      ? undefined
-      : JSON.stringify(transformedBody);
-
-  return new Request(original.url, {
-    method,
-    headers: original.headers,
-    body,
-  }) as unknown as NextRequest;
+  if (['GET', 'HEAD'].includes(original.method) || transformedBody === undefined) return original;
+  const headers = new Headers(original.headers);
+  headers.delete('content-length');
+  const RequestType = original.constructor as typeof Request;
+  return new RequestType(original, {
+    headers,
+    body: JSON.stringify(transformedBody),
+  }) as NextRequest;
 }

@@ -135,3 +135,30 @@ describe('VersionDetector', () => {
     expect(result.version).toBe('v1');
   });
 });
+
+describe('source order and path regressions', () => {
+  it('honors query-before-header configuration', () => {
+    const detector = createDetector({
+      sources: [
+        { type: 'query', name: 'version' },
+        { type: 'header', name: 'api-version' },
+      ],
+    });
+    expect(detector.detect({ 'api-version': 'v2' }, '/users', { version: 'v1' }).version).toBe(
+      'v1',
+    );
+  });
+
+  it('does not treat a version prefix inside a path segment as a version', () => {
+    const detector = createDetector({ sources: [{ type: 'path' }] });
+    expect(detector.detect({}, '/api/v1beta/users', {}).version).toBe('v4');
+    expect(detector.detect({}, '/api/v1/', {}).version).toBe('v1');
+    expect(detector.detect({}, '/api/v2', {}).version).toBe('v2');
+  });
+
+  it('handles global and sticky user patterns consistently across requests', () => {
+    const detector = createDetector({ sources: [{ type: 'path', pattern: /\/(v\d+)(?=\/|$)/gy }] });
+    expect(detector.detect({}, '/api/v1/users', {}).version).toBe('v1');
+    expect(detector.detect({}, '/api/v2/users', {}).version).toBe('v2');
+  });
+});

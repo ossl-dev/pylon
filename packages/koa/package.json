@@ -27,7 +27,7 @@
     "@ossl/pylon-core": "workspace:*"
   },
   "peerDependencies": {
-    "koa": "^2.0.0"
+    "koa": "^2.0.0 || ^3.0.0"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

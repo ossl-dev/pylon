@@ -360,3 +360,114 @@ describe('Pylon', () => {
     });
   });
 });
+
+describe('pipeline regressions', () => {
+  it('supports a current-version-only API with no transforms', async () => {
+    const pylon = new Pylon({
+      current: 'v1',
+      schemas: { v1: z.object({ name: z.string() }) },
+      transforms: {},
+    });
+    expect((await pylon.processRequest({}, '/', {}, { name: 'Ada' })).body).toEqual({
+      name: 'Ada',
+    });
+  });
+
+  it('rejects unknown and explicitly missing versions instead of using the default', async () => {
+    const pylon = createPylon({
+      versioning: { sources: [{ type: 'header', name: 'api-version' }], onMissing: 'reject' },
+    });
+    expect(
+      (await pylon.processRequest({ 'api-version': 'v99' }, '/', {}, { fullName: 'Ada' })).status,
+    ).toBe(400);
+    expect((await pylon.processRequest({}, '/', {}, { fullName: 'Ada' })).status).toBe(400);
+    expect((await pylon.processRequest({}, '/', {}, undefined, { version: 'v99' })).status).toBe(
+      400,
+    );
+  });
+
+  it('fails closed when request or response transforms throw', async () => {
+    const pylon = createPylon({
+      schemas: { v2: z.unknown() },
+      transforms: {
+        'v1->v2': {
+          request: () => {
+            throw new Error('request bug');
+          },
+          response: () => {
+            throw new Error('response bug');
+          },
+        },
+      },
+    });
+    const request = await pylon.processRequest(
+      { 'api-version': 'v1' },
+      '/',
+      {},
+      { secret: 'private' },
+    );
+    expect(request.status).toBe(500);
+    expect(request.body).toHaveProperty('error.code', 'EXECUTION_ERROR');
+    const response = await pylon.processResponse('v1', { secret: 'private' }, {}, []);
+    expect(response.status).toBe(500);
+    expect(response.body).toHaveProperty('error.code', 'RESPONSE_TRANSFORM_FAILED');
+    expect(response.body).not.toHaveProperty('secret');
+  });
+
+  it('validates rollback requests and downgrades responses to the fallback contract', async () => {
+    const pylon = createPylon();
+    await pylon.rollback('v2', { fallback: 'v1', reason: 'broken release' });
+    const invalid = await pylon.processRequest({ 'api-version': 'v2' }, '/', {}, { name: 123 });
+    expect(invalid.status).toBe(422);
+    const response = await pylon.processResponse('v2', { fullName: 'Ada' }, {}, []);
+    expect(response.body).toHaveProperty('name', 'Ada');
+  });
+
+  it('loads deprecations from version definitions and prevents retired versions from being republished', async () => {
+    const pylon = createPylon({
+      versions: [
+        { name: 'v1', order: 1, deprecated: true },
+        { name: 'v2', order: 2 },
+      ],
+    });
+    expect(pylon.isDeprecated('v1')).toBe(true);
+    await pylon.retire('v1', {});
+    await expect(pylon.publish('v1')).rejects.toThrow('permanently retired');
+  });
+});
+
+describe('endpoint policies', () => {
+  it('caches scoped engines and shares lifecycle changes', async () => {
+    const pylon = createPylon({ endpoints: { users: {} } });
+    const scoped = pylon.forEndpoint('users');
+    expect(pylon.forEndpoint('users')).toBe(scoped);
+    await pylon.rollback('v1', { fallback: 'v2', reason: 'retired', mode: 'reject' });
+    expect(scoped.isUnpublished('v1')).toBe(true);
+  });
+
+  it('disables version detection on unversioned endpoints', async () => {
+    const pylon = createPylon({ endpoints: { health: { versioning: false } } });
+    const result = await pylon.processRequest(
+      { 'api-version': 'v99' },
+      '/',
+      {},
+      { fullName: 'Ada' },
+      { endpoint: 'health' },
+    );
+    expect(result.version).toBe('v2');
+    expect(result.transformResult.status).toBe('success');
+  });
+
+  it('enforces endpoint minimum versions', async () => {
+    const pylon = createPylon({ endpoints: { users: { minVersion: 'v2' } } });
+    const result = await pylon.processRequest(
+      { 'api-version': 'v1' },
+      '/',
+      {},
+      { name: 'Ada' },
+      { endpoint: 'users' },
+    );
+    expect(result.status).toBe(400);
+    expect(result.body).toHaveProperty('error.code', 'VERSION_TOO_OLD');
+  });
+});

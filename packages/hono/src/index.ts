@@ -77,29 +77,6 @@ async function readBody(c: {
 }
 
 /**
- * Derive an appropriate HTTP status code from a Pylon error response body.
- *
- * - `VERSION_UNPUBLISHED` -> 410 Gone
- * - `TRANSFORM_FAILED` / `VALIDATION_ERROR` -> 422 Unprocessable Entity
- * - Everything else -> 422
- */
-function errorStatusCode(body: unknown): 410 | 422 {
-  if (body && typeof body === 'object') {
-    const err = (body as Record<string, unknown>).error as Record<string, unknown> | undefined;
-    if (err && typeof err === 'object') {
-      const code = err.code as string | undefined;
-      if (code === 'VERSION_UNPUBLISHED') {
-        return 410;
-      }
-      if (code === 'TRANSFORM_FAILED' || code === 'VALIDATION_ERROR') {
-        return 422;
-      }
-    }
-  }
-  return 422;
-}
-
-/**
  * Hono middleware that intercepts requests and applies Pylon version transforms.
  *
  * Usage:
@@ -126,6 +103,7 @@ function errorStatusCode(body: unknown): 410 | 422 {
  * @param options - Optional endpoint override
  */
 export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareHandler {
+  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return async (c, next) => {
     /* ---- REQUEST PHASE ---- */
 
@@ -150,7 +128,7 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
       for (const [key, value] of Object.entries(reqResult.headers)) {
         c.header(key, value as string);
       }
-      return c.json(reqResult.body, errorStatusCode(reqResult.body));
+      return c.json(reqResult.body, (reqResult.status ?? 422) as 400 | 410 | 422 | 500);
     }
 
     // 5. Set version / deprecation response headers
@@ -165,7 +143,10 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
         typeof reqResult.body === 'string' ? reqResult.body : JSON.stringify(reqResult.body);
       // Hono stores Promises in bodyCache even though the TS types say `string`.
       // biome-ignore lint/suspicious/noExplicitAny: bodyCache stores Promises at runtime
-      (c.req as any).bodyCache.text = Promise.resolve(serialized);
+      (c.req as any).bodyCache = {
+        text: Promise.resolve(serialized),
+        json: Promise.resolve(reqResult.body),
+      };
     }
 
     /* ---- RESPONSE PHASE ---- */
@@ -188,17 +169,13 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     // Read the response body (clone so we don't consume the original)
     const res = c.res;
     const resContentType = res.headers.get('content-type') ?? '';
+    if (!res.body || !resContentType.includes('json')) return;
     let resBody: unknown;
 
     try {
-      if (resContentType.includes('json')) {
-        resBody = await res.clone().json();
-      } else {
-        const text = await res.clone().text();
-        resBody = text || undefined;
-      }
+      resBody = await res.clone().json();
     } catch {
-      resBody = undefined;
+      return;
     }
 
     // Collect original response headers
@@ -217,6 +194,9 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
       debug,
     );
 
+    delete resResult.headers['content-length'];
+    c.header('content-length', undefined);
+
     // 8. Build the final transformed response
     const newBodyStr = resResult.body !== undefined ? JSON.stringify(resResult.body) : null;
 
@@ -227,8 +207,8 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     }
 
     c.res = new Response(newBodyStr, {
-      status: res.status,
-      statusText: res.statusText,
+      status: resResult.status ?? res.status,
+      statusText: resResult.status ? undefined : res.statusText,
     });
   };
 }

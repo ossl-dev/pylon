@@ -45,6 +45,7 @@ import { z } from 'zod';
 const pylon = new Pylon({
   current: 'v4',
   defaultVersion: 'v4',
+  versions: { format: 'semantic' },
 
   schemas: {
     v2: z.object({
@@ -73,15 +74,14 @@ const pylon = new Pylon({
   transforms: {
     'v2->v3': {
       request: (req) => ({
-        fullName: combine(req.first_name, req.last_name),
+        fullName: req.name,
         address: {
           street: req.address_line_1,
           city: req.city,
         },
       }),
       response: (res) => ({
-        first_name: split(res.fullName, 0),
-        last_name: split(res.fullName, 1),
+        name: res.fullName,
         address_line_1: res.address.street,
         city: res.address.city,
       }),

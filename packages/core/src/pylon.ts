@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { validateConfig } from './config.js';
-import { TransformEngine } from './transform-engine.js';
+import { mergeConfigs } from './endpoint.js';
+import { TransformEngine, TransformError } from './transform-engine.js';
 import type {
   DebugInfo,
   EndpointConfig,
@@ -11,7 +12,7 @@ import type {
   TransformResult,
   VersionResult,
 } from './types.js';
-import { VersionDetector } from './version-detector.js';
+import { VersionDetectionError, VersionDetector } from './version-detector.js';
 import { VersionNormalizer } from './version-normalizer.js';
 
 /**
@@ -39,6 +40,9 @@ export class Pylon {
   readonly engine: TransformEngine;
   private rollbacks: Map<string, RollbackStatus>;
   private unpublished: Set<string>;
+  private retired = new Set<string>();
+  private endpointCache = new Map<string, Pylon>();
+  private endpointPolicy?: EndpointConfig;
   /** Mutable deprecation state tracked at the Pylon instance level */
   private deprecations: Map<
     string,
@@ -55,11 +59,23 @@ export class Pylon {
     this.current = config.current;
     this.defaultVersion = config.defaultVersion ?? config.current;
     this.normalizer = new VersionNormalizer(config.versions, config.current);
+    for (const version of [this.current, this.defaultVersion]) {
+      if (!this.normalizer.isValid(version))
+        throw new Error(`Configured version "${version}" is not in the version definitions`);
+    }
     this.detector = new VersionDetector(config.versioning, this.normalizer, this.defaultVersion);
     this.engine = new TransformEngine(config.transforms, config.schemas, this.normalizer);
     this.rollbacks = new Map();
     this.unpublished = new Set();
     this.deprecations = new Map();
+    for (const version of this.normalizer.listVersions()) {
+      if (version.deprecated)
+        this.deprecations.set(version.name, {
+          deprecated: true,
+          sunsetDate: version.sunsetDate,
+          migrationGuide: version.migrationGuide,
+        });
+    }
   }
 
   /**
@@ -88,142 +104,78 @@ export class Pylon {
     body?: unknown,
     options?: ProcessRequestOptions,
   ): Promise<{
+    status?: number;
     headers: Record<string, string>;
     body: unknown;
     debug?: DebugInfo;
     version: string;
     transformResult: TransformResult;
   }> {
+    if (options?.endpoint) {
+      const scoped = this.forEndpoint(options.endpoint);
+      if (scoped !== this)
+        return scoped.processRequest(headers, path, query, body, {
+          ...options,
+          endpoint: undefined,
+        });
+    }
     const startTime = Date.now();
 
-    // 1. Detect version
     let versionResult: VersionResult;
     try {
-      versionResult = options?.version
-        ? { version: options.version, source: 'header' as const }
-        : this.detectVersion(headers, path, query, body as Record<string, unknown>);
-    } catch {
-      // If version detection fails entirely, use default
-      versionResult = { version: this.defaultVersion, source: 'default' };
+      versionResult =
+        options?.version !== undefined
+          ? { version: options.version, source: 'header' }
+          : this.detectVersion(headers, path, query, body);
+      if (!this.normalizer.isValid(versionResult.version)) {
+        throw new VersionDetectionError(
+          `Invalid API version: "${versionResult.version}"`,
+          'INVALID_API_VERSION',
+        );
+      }
+    } catch (error) {
+      if (!(error instanceof VersionDetectionError)) throw error;
+      return this.requestError(
+        options?.version ?? this.defaultVersion,
+        error.code,
+        error.message,
+        400,
+      );
     }
 
-    const clientVersion = versionResult.version;
-
-    // Check if version is unpublished (rolled back)
-    if (this.isUnpublished(clientVersion)) {
-      const rollback = this.getRollback(clientVersion);
-      if (rollback && rollback.mode === 'reject') {
-        return {
-          headers: {
-            'content-type': 'application/json',
-            ...this.generateResponseHeaders(clientVersion, this.current),
-          },
-          body: {
-            error: {
-              code: 'VERSION_UNPUBLISHED',
-              message: `API version "${clientVersion}" has been unpublished. Reason: ${rollback.reason}. Use version "${rollback.fallbackVersion}" instead.`,
-            },
-          },
-          version: clientVersion,
-          transformResult: {
-            status: 'error',
-            error: {
-              code: 'VERSION_UNPUBLISHED',
-              message: rollback.reason,
-            },
-          },
-        };
-      }
-
-      // For 'downgrade' and 'shadow' modes, continue but use fallback version
-      if (rollback && rollback.mode === 'downgrade') {
-        const transformsApplied: string[] = [];
-        let transformResult: TransformResult = { status: 'success', data: body };
-        let transformedBody = body;
-
-        if (rollback.fallbackVersion !== this.current) {
-          try {
-            transformResult = await this.engine.execute(
-              rollback.fallbackVersion,
-              this.current,
-              'request',
-              body,
-              (err) =>
-                this.config.onTransformError?.({
-                  source: rollback.fallbackVersion,
-                  target: this.current,
-                  direction: 'request',
-                  originalError: err instanceof Error ? err : new Error(String(err)),
-                  endpoint: options?.endpoint,
-                }),
-            );
-
-            if (transformResult.data !== undefined) {
-              transformedBody = transformResult.data;
-            }
-            transformsApplied.push(`${rollback.fallbackVersion}->${this.current}`);
-          } catch (err: any) {
-            return {
-              headers: {
-                'content-type': 'application/json',
-                ...this.generateResponseHeaders(clientVersion, this.current),
-              },
-              body: {
-                error: {
-                  code: 'TRANSFORM_FAILED',
-                  message: `Failed to transform request from "${rollback.fallbackVersion}" to "${this.current}": ${err.message}`,
-                },
-              },
-              version: clientVersion,
-              transformResult: {
-                status: 'error',
-                error: {
-                  code: 'TRANSFORM_FAILED',
-                  message: err.message,
-                },
-              },
-            };
-          }
-        }
-
-        const responseHeaders = this.generateResponseHeaders(clientVersion, this.current);
-
-        // Observability hook
-        const durationMs = Date.now() - startTime;
-        this.config.observability?.onTransform?.({
-          source: clientVersion,
-          target: this.current,
-          direction: 'request',
-          durationMs,
-          endpoint: options?.endpoint,
-        });
-
-        const debug = this.buildDebugInfo({
+    let clientVersion = this.normalizer.resolveAlias(versionResult.version);
+    const minVersion = this.endpointPolicy?.minVersion;
+    if (minVersion && this.normalizer.compare(clientVersion, minVersion) < 0) {
+      if (this.endpointPolicy?.onOldVersion === 'use-closest') clientVersion = minVersion;
+      else
+        return this.requestError(
           clientVersion,
-          currentVersion: this.current,
-          transformsApplied,
-          startTime,
-        });
-
-        return {
-          headers: responseHeaders,
-          body: transformedBody,
-          version: clientVersion,
-          transformResult,
-          debug: this.config.debug?.enabled ? debug : undefined,
-        };
-      }
+          'VERSION_TOO_OLD',
+          `Endpoint requires API version "${minVersion}" or newer`,
+          400,
+        );
     }
+    const rollback = this.getRollback(clientVersion);
+    if (rollback?.mode === 'reject') {
+      return this.requestError(
+        clientVersion,
+        'VERSION_UNPUBLISHED',
+        `API version "${clientVersion}" has been unpublished. Reason: ${rollback.reason}. Use version "${rollback.fallbackVersion}" instead.`,
+        410,
+      );
+    }
+    const effectiveVersion =
+      rollback?.mode === 'downgrade' ? rollback.fallbackVersion : clientVersion;
 
     // 2. Transform request to current version
     let transformsApplied: string[] = [];
     let transformResult: TransformResult = { status: 'success', data: body };
     let transformedBody = body;
 
-    if (clientVersion !== this.current) {
+    if (effectiveVersion !== this.current) {
       try {
         transformResult = await this.engine.execute(
-          clientVersion,
+          effectiveVersion,
           this.current,
           'request',
           body,
@@ -237,37 +189,28 @@ export class Pylon {
             }),
         );
 
-        if (transformResult.data !== undefined) {
-          transformedBody = transformResult.data;
-        }
+        if (transformResult.status !== 'error') transformedBody = transformResult.data;
 
-        try {
-          transformsApplied = this.engine.buildChain(clientVersion, this.current);
-        } catch {
-          // Chain building is best-effort for debug purposes
-        }
-      } catch (err: any) {
-        return {
-          headers: {
-            'content-type': 'application/json',
-            ...this.generateResponseHeaders(clientVersion, this.current),
-          },
-          body: {
-            error: {
-              code: 'TRANSFORM_FAILED',
-              message: `Failed to transform request from "${clientVersion}" to "${this.current}": ${err.message}`,
-            },
-          },
-          version: clientVersion,
-          transformResult: {
-            status: 'error',
-            error: {
-              code: 'TRANSFORM_FAILED',
-              message: err.message,
-            },
-          },
-        };
+        if (this.config.debug?.enabled)
+          transformsApplied = this.engine.buildChain(effectiveVersion, this.current);
+      } catch (error) {
+        return this.requestError(
+          clientVersion,
+          'TRANSFORM_FAILED',
+          error instanceof Error ? error.message : String(error),
+          500,
+        );
       }
+    }
+
+    if (transformResult.status === 'error') {
+      return this.requestError(
+        clientVersion,
+        transformResult.error?.code ?? 'TRANSFORM_FAILED',
+        transformResult.error?.message ?? 'Request transformation failed',
+        500,
+        transformResult.error?.details,
+      );
     }
 
     // 3. Validate against current version's schema
@@ -279,6 +222,7 @@ export class Pylon {
       } catch (err: any) {
         if (err instanceof z.ZodError) {
           return {
+            status: 422,
             headers: {
               'content-type': 'application/json',
               ...this.generateResponseHeaders(clientVersion, this.current),
@@ -305,6 +249,8 @@ export class Pylon {
       }
     }
 
+    transformResult = { ...transformResult, data: transformedBody };
+
     // Generate response headers
     const responseHeaders = this.generateResponseHeaders(clientVersion, this.current);
 
@@ -318,14 +264,16 @@ export class Pylon {
       endpoint: options?.endpoint,
     });
 
-    const debug = this.buildDebugInfo({
-      clientVersion,
-      currentVersion: this.current,
-      transformsApplied,
-      originalRequest: body,
-      transformedRequest: transformedBody,
-      startTime,
-    });
+    const debug = this.config.debug?.enabled
+      ? this.buildDebugInfo({
+          clientVersion,
+          currentVersion: this.current,
+          transformsApplied,
+          originalRequest: body,
+          transformedRequest: transformedBody,
+          startTime,
+        })
+      : undefined;
 
     return {
       headers: responseHeaders,
@@ -333,6 +281,26 @@ export class Pylon {
       version: clientVersion,
       transformResult,
       debug: this.config.debug?.enabled ? debug : undefined,
+    };
+  }
+
+  private requestError(
+    version: string,
+    code: string,
+    message: string,
+    status: number,
+    details?: Record<string, unknown>,
+  ) {
+    const error = { code, message, ...(details ? { details } : {}) };
+    return {
+      status,
+      headers: {
+        'content-type': 'application/json',
+        ...this.generateResponseHeaders(version, this.current),
+      },
+      body: { error },
+      version,
+      transformResult: { status: 'error' as const, error },
     };
   }
 
@@ -357,13 +325,17 @@ export class Pylon {
     transformsApplied: string[],
     debug?: DebugInfo,
   ): Promise<{
+    status?: number;
     headers: Record<string, string>;
     body: unknown;
     debug?: DebugInfo;
   }> {
     const startTime = Date.now();
 
-    if (!clientVersion || clientVersion === this.current) {
+    clientVersion = this.normalizer.resolveAlias(clientVersion);
+    const rollback = this.getRollback(clientVersion);
+    const targetVersion = rollback?.mode === 'downgrade' ? rollback.fallbackVersion : clientVersion;
+    if (!clientVersion || targetVersion === this.current) {
       return {
         headers: responseHeaders,
         body: responseBody,
@@ -376,7 +348,7 @@ export class Pylon {
     try {
       const result = await this.engine.execute(
         this.current,
-        clientVersion,
+        targetVersion,
         'response',
         responseBody,
         (err) =>
@@ -388,9 +360,14 @@ export class Pylon {
           }),
       );
 
-      if (result.data !== undefined) {
-        transformedBody = result.data;
+      if (result.status === 'error') {
+        throw new TransformError(
+          result.error?.message ?? 'Response transformation failed',
+          result.error?.code ?? 'RESPONSE_TRANSFORM_FAILED',
+          result.error?.details,
+        );
       }
+      transformedBody = result.data;
     } catch (err: any) {
       this.config.observability?.onError?.({
         source: this.current,
@@ -400,6 +377,7 @@ export class Pylon {
       });
 
       return {
+        status: 500,
         headers: {
           ...responseHeaders,
           'content-type': 'application/json',
@@ -414,14 +392,16 @@ export class Pylon {
       };
     }
 
-    const updatedDebug = this.buildDebugInfo({
-      clientVersion,
-      currentVersion: this.current,
-      transformsApplied: [...transformsApplied].reverse(),
-      originalResponse: responseBody,
-      transformedResponse: transformedBody,
-      startTime,
-    });
+    const updatedDebug = this.config.debug?.enabled
+      ? this.buildDebugInfo({
+          clientVersion,
+          currentVersion: this.current,
+          transformsApplied: [...transformsApplied].reverse(),
+          originalResponse: responseBody,
+          transformedResponse: transformedBody,
+          startTime,
+        })
+      : undefined;
 
     return {
       headers: {
@@ -536,6 +516,8 @@ export class Pylon {
    */
   async publish(version: string): Promise<void> {
     const resolved = this.normalizer.resolveAlias(version);
+    if (this.retired.has(resolved))
+      throw new Error(`Cannot publish permanently retired version: "${version}"`);
     this.unpublished.delete(resolved);
     this.rollbacks.delete(resolved);
   }
@@ -568,6 +550,8 @@ export class Pylon {
       mode: 'reject',
       active: true,
     });
+
+    this.retired.add(resolved);
 
     // Mark as deprecated as well
     this.deprecate(resolved, config);
@@ -691,43 +675,23 @@ export class Pylon {
    * @param endpoint - The endpoint name to scope to
    * @returns A new Pylon instance for the endpoint
    */
-  forEndpoint(endpoint: string): Pylon {
-    const endpointConfig = this.config.endpoints?.[endpoint];
+  forEndpoint(endpoint: string, config?: EndpointConfig): Pylon {
+    const cached = this.endpointCache.get(endpoint);
+    if (cached && !config) return cached;
+    const endpointConfig = config ?? this.config.endpoints?.[endpoint];
     if (!endpointConfig) {
       return this;
     }
 
-    const merged = this.mergeEndpointConfig(this.config, endpointConfig);
-    return new Pylon(merged);
-  }
-
-  /**
-   * Merge endpoint config with global config.
-   *
-   * Endpoint-specific transforms and schemas override global ones at the key level.
-   * Avoids circular dependency with endpoint.ts by inlining the merge logic.
-   */
-  private mergeEndpointConfig(global: PylonConfig, endpoint: EndpointConfig): PylonConfig {
-    return {
-      ...global,
-      current: endpoint.current ?? global.current,
-      schemas: {
-        ...(global.schemas ?? {}),
-        ...(endpoint.schemas ?? {}),
-      },
-      transforms: {
-        ...(global.transforms ?? {}),
-        ...(endpoint.transforms ?? {}),
-      },
-      versioning: endpoint.versioning === false ? undefined : global.versioning,
-      ...(endpoint.minVersion
-        ? {
-            versioning: {
-              ...(global.versioning ?? { sources: [] }),
-            },
-          }
-        : {}),
-    };
+    const merged = mergeConfigs(this.config, endpointConfig);
+    const scoped = new Pylon(merged);
+    scoped.endpointPolicy = endpointConfig;
+    scoped.rollbacks = this.rollbacks;
+    scoped.unpublished = this.unpublished;
+    scoped.retired = this.retired;
+    scoped.deprecations = this.deprecations;
+    if (!config) this.endpointCache.set(endpoint, scoped);
+    return scoped;
   }
 
   /**

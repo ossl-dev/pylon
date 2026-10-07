@@ -28,7 +28,20 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "@ossl/pylon-express": "workspace:*",
+    "@types/express": "^5.0.6",
+    "express": "^5.2.1",
+    "zod": "^4.4.3",
+    "@ossl/pylon-fastify": "workspace:*",
+    "@ossl/pylon-hono": "workspace:*",
+    "hono": "^4.12.25",
+    "@ossl/pylon-koa": "workspace:*",
+    "@types/koa": "^3.0.3",
+    "koa": "^3.2.1",
+    "@ossl/pylon-next": "workspace:*",
+    "next": "^16.2.9",
+    "@types/node": "^25.9.3"
   },
   "publishConfig": {
     "access": "public"

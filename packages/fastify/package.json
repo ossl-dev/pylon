@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "@ossl/pylon-core": "workspace:*",
-    "fastify": "^5.8.5"
+    "fastify": "^5.8.5",
+    "fastify-plugin": "^5.1.0"
   },
   "peerDependencies": {
     "fastify": "^5.0.0"

@@ -1,5 +1,6 @@
 import type { DebugInfo, Pylon } from '@ossl/pylon-core';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import fp from 'fastify-plugin';
 
 export interface PylonFastifyOptions {
   /** Override endpoint name for per-endpoint config. */
@@ -46,12 +47,12 @@ const metaMap = new WeakMap<FastifyRequest, RequestMeta>();
  * @param options - Plugin options (pylon instance + optional endpoint)
  * @param done    - Registration completion callback
  */
-export function pylonFastify(
+function pylonFastifyPlugin(
   fastify: FastifyInstance,
   options: { pylon: Pylon; endpoint?: string },
   done: (err?: Error) => void,
 ): void {
-  const { pylon } = options;
+  const pylon = options.endpoint ? options.pylon.forEndpoint(options.endpoint) : options.pylon;
   const endpoint = options.endpoint;
 
   // ── preHandler ──────────────────────────────────────────────────
@@ -85,9 +86,11 @@ export function pylonFastify(
         for (const [key, value] of Object.entries(result.headers)) {
           void reply.header(key, value);
         }
-        void reply.code(400).send(result.body);
+        void reply.code(result.status ?? 400).send(result.body);
         return;
       }
+
+      for (const [key, value] of Object.entries(result.headers)) void reply.header(key, value);
 
       // Replace the body so the route handler receives data in the
       // current version's shape.
@@ -130,6 +133,8 @@ export function pylonFastify(
           void reply.header(key, value);
         }
 
+        if (result.status) void reply.code(result.status);
+        reply.removeHeader('content-length');
         return JSON.stringify(result.body);
       } catch {
         // Graceful degradation: send the current-version payload.
@@ -146,3 +151,5 @@ export function pylonFastify(
 
   done();
 }
+
+export const pylonFastify = fp(pylonFastifyPlugin, { name: 'pylon-fastify', fastify: '5.x' });

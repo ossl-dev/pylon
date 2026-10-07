@@ -88,7 +88,7 @@ Make the engine faster, safer, more flexible.
 - [ ] Add `beforeAll` / `afterAll` hooks — run a transform before/after every version hop (useful for logging, metrics, auth header migration)
 - [ ] Support conditional transforms — "if the request has field X, apply this transform; otherwise skip"
 - [ ] Add transform dry-run mode — pass a sample payload through a chain and see each step's output
-- [ ] Benchmark and optimize chain compilation — cache compiled chains across requests, avoid re-compilation when nothing changed
+- [x] Benchmark and optimize chain compilation — cache compiled functions and execution steps per engine; keep endpoint caches isolated
 
 ### Version normalizer
 
@@ -108,7 +108,7 @@ Make the engine faster, safer, more flexible.
 
 - [ ] Better transform error messages — include the version hop, field name, and input value that caused the failure
 - [ ] Add a debug mode that logs every transform step with before/after payloads
-- [ ] Distinguish client errors (bad version header) from server errors (transform bug) in response status codes
+- [x] Distinguish client errors (400/422) from server transform errors (500) across all adapters
 
 ---
 
@@ -154,7 +154,7 @@ Each adapter should feel native, not like a port.
 
 - [ ] **Express**: redesign to avoid monkey-patching `res.json` / `res.send`. Explore using a Router-level middleware that intercepts before the response is written.
 - [ ] **Fastify**: add `onRoute` hook integration so version config can be applied per-route at registration time
-- [ ] **Koa**: add tests (currently zero)
+- [x] **Koa**: add tests
 - [ ] **Next.js**: add App Router `middleware.ts` support (edge-compatible, runs before route handlers)
 - [ ] **Hono**: add Hono RPC integration — versioned client types generated from server schema
 
@@ -170,7 +170,7 @@ Each adapter should feel native, not like a port.
 
 ### Adapter quality standards
 
-- [ ] Every adapter must pass the shared contract test suite
+- [x] Every adapter must pass the shared contract test suite
 - [ ] Every adapter must have a shadow mode variant
 - [ ] Every adapter must have typed request augmentation (version info available in route handlers)
 - [ ] Every adapter readme must have a working copy-paste example

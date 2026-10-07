@@ -391,10 +391,10 @@ describe('pylonNext error handling', () => {
     const body = await res.json();
 
     expect(res.status).toBe(410);
-    expect(body).toHaveProperty('code', 'VERSION_UNPUBLISHED');
+    expect(body).toHaveProperty('error.code', 'VERSION_UNPUBLISHED');
   });
 
-  it('returns 422 for transform failure', async () => {
+  it('returns 500 for transform failure', async () => {
     const brokenPylon = new Pylon({
       current: 'v4',
       defaultVersion: 'v4',
@@ -433,8 +433,8 @@ describe('pylonNext error handling', () => {
     const res = await handler(req);
     const body = await res.json();
 
-    expect(res.status).toBe(422);
-    expect(body).toHaveProperty('code', 'EXECUTION_ERROR');
+    expect(res.status).toBe(500);
+    expect(body).toHaveProperty('error.code', 'EXECUTION_ERROR');
   });
 
   it('returns 422 for validation error', async () => {
@@ -470,6 +470,6 @@ describe('pylonNext error handling', () => {
     const body = await res.json();
 
     expect(res.status).toBe(422);
-    expect(body).toHaveProperty('code', 'VALIDATION_ERROR');
+    expect(body).toHaveProperty('error.code', 'VALIDATION_ERROR');
   });
 });

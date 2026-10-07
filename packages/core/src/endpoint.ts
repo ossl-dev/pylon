@@ -1,4 +1,4 @@
-import { Pylon } from './pylon.js';
+import type { Pylon } from './pylon.js';
 import type { EndpointConfig, PylonConfig } from './types.js';
 
 /**
@@ -13,39 +13,24 @@ import type { EndpointConfig, PylonConfig } from './types.js';
  * @returns A new merged PylonConfig
  */
 export function mergeConfigs(global: PylonConfig, endpoint: EndpointConfig): PylonConfig {
-  // Start with global config, then selectively override with endpoint fields
-  // Avoid spreading endpoint directly because EndpointConfig.versioning can be `false`
-  // which conflicts with PylonConfig.versioning's type.
-  const merged: PylonConfig = {
+  return {
     ...global,
     current: endpoint.current ?? global.current,
-    schemas: {
-      ...(global.schemas ?? {}),
-      ...(endpoint.schemas ?? {}),
-    },
-    transforms: {
-      ...(global.transforms ?? {}),
-      ...(endpoint.transforms ?? {}),
-    },
-    versioning: endpoint.versioning === false ? undefined : (global.versioning ?? undefined),
-    // EndpointConfig extends PylonConfig for the shared subset; spread remaining
-    // known fields that are safe to carry over
-    endpoints: global.endpoints,
-    observability: global.observability,
-    debug: global.debug,
-    onTransformError: global.onTransformError,
-    defaultVersion: global.defaultVersion,
-    versions: global.versions,
+    defaultVersion:
+      endpoint.versioning === false ? (endpoint.current ?? global.current) : global.defaultVersion,
+    schemas: { ...global.schemas, ...endpoint.schemas },
+    transforms: Object.fromEntries(
+      Object.keys({ ...global.transforms, ...endpoint.transforms }).map((key) => [
+        key,
+        {
+          ...global.transforms[key],
+          ...endpoint.transforms?.[key],
+        },
+      ]),
+    ),
+    versioning:
+      endpoint.versioning === false ? { sources: [], onMissing: 'use-default' } : global.versioning,
   };
-
-  // Merge versioning config if both exist
-  if (global.versioning && endpoint.minVersion !== undefined) {
-    merged.versioning = {
-      ...global.versioning,
-    };
-  }
-
-  return merged;
 }
 
 /**
@@ -61,9 +46,7 @@ export function mergeConfigs(global: PylonConfig, endpoint: EndpointConfig): Pyl
  * @returns A new Pylon instance configured for the endpoint
  */
 export function createEndpoint(pylon: Pylon, _endpointName: string, config: EndpointConfig): Pylon {
-  const mergedConfig = mergeConfigs(pylon.config, config);
-  const endpointPylon = new Pylon(mergedConfig);
-  return endpointPylon;
+  return pylon.forEndpoint(_endpointName, config);
 }
 
 /**

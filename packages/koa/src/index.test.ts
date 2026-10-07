@@ -457,10 +457,10 @@ describe('pylonKoa error handling', () => {
     });
 
     expect(status).toBe(410);
-    expect(body).toHaveProperty('code', 'VERSION_UNPUBLISHED');
+    expect(body).toHaveProperty('error.code', 'VERSION_UNPUBLISHED');
   });
 
-  it('returns 422 for transform failure', async () => {
+  it('returns 500 for transform failure', async () => {
     const app = new Koa();
     // Create pylon with a broken transform
     const brokenPylon = new Pylon({
@@ -501,8 +501,8 @@ describe('pylonKoa error handling', () => {
       body: { name: 'test' },
     });
 
-    expect(status).toBe(422);
-    expect(body).toHaveProperty('code', 'EXECUTION_ERROR');
+    expect(status).toBe(500);
+    expect(body).toHaveProperty('error.code', 'EXECUTION_ERROR');
   });
 
   it('returns 422 for validation error (body fails schema)', async () => {
@@ -541,7 +541,7 @@ describe('pylonKoa error handling', () => {
     });
 
     expect(status).toBe(422);
-    expect(body).toHaveProperty('code', 'VALIDATION_ERROR');
+    expect(body).toHaveProperty('error.code', 'VALIDATION_ERROR');
   });
 
   it('passes through non-JSON response body without crashing', async () => {
@@ -596,7 +596,7 @@ describe('pylonKoa error handling', () => {
 
     // GET without body triggers schema validation error since v4 schema requires fullName
     expect(status).toBe(422);
-    expect(body).toHaveProperty('code', 'VALIDATION_ERROR');
+    expect(body).toHaveProperty('error.code', 'VALIDATION_ERROR');
   });
 });
 

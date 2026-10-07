@@ -40,6 +40,7 @@ declare module 'koa' {
  * 3. Set version headers on response
  */
 export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
+  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return async (
     ctx: ParameterizedContext<DefaultState, DefaultContext>,
     next: () => Promise<unknown>,
@@ -68,8 +69,9 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
 
     // If error, return Pylon error response
     if (result.transformResult.status === 'error' && result.transformResult.error) {
-      ctx.status = result.transformResult.error.code === 'VERSION_UNPUBLISHED' ? 410 : 422;
-      ctx.body = result.transformResult.error;
+      ctx.status =
+        result.status ?? (result.transformResult.error.code === 'VERSION_UNPUBLISHED' ? 410 : 422);
+      ctx.body = result.body;
       for (const [key, value] of Object.entries(result.headers)) {
         if (value !== undefined) {
           ctx.set(key, value);
@@ -103,18 +105,21 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
     // 5. Transform response back to client version
     if (ctx.pylonClientVersion !== pylon.current && ctx.body !== undefined && ctx.body !== null) {
       try {
-        // Koa ctx.body can be string, Buffer, stream, or object.
-        // We only attempt to transform JSON-serializable objects (most common for APIs).
-        const responseBodyStr =
-          typeof ctx.body === 'object' ? JSON.stringify(ctx.body) : String(ctx.body);
-
-        let responseBody: unknown;
-        try {
-          responseBody = JSON.parse(responseBodyStr) as unknown;
-        } catch {
-          // If body is not JSON, skip transform (streams, buffers, plain text)
+        if (
+          ctx.body instanceof Uint8Array ||
+          typeof (ctx.body as { pipe?: unknown }).pipe === 'function'
+        ) {
           setHeaders(ctx, result.headers);
           return;
+        }
+        let responseBody: unknown = ctx.body;
+        if (typeof responseBody === 'string') {
+          try {
+            responseBody = JSON.parse(responseBody);
+          } catch {
+            setHeaders(ctx, result.headers);
+            return;
+          }
         }
 
         const responseResult = await pylon.processResponse(
@@ -126,11 +131,13 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
         );
 
         ctx.body = responseResult.body;
+        if (responseResult.status) ctx.status = responseResult.status;
         setHeaders(ctx, { ...result.headers, ...responseResult.headers });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[pylon] Response transform failed: ${message}`);
-        // Fall through with original body
+        ctx.status = 500;
+        ctx.body = { error: { code: 'RESPONSE_TRANSFORM_FAILED', message } };
         setHeaders(ctx, result.headers);
       }
     } else {

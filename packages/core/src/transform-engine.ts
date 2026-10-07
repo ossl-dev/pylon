@@ -1,379 +1,222 @@
-import type {
-  SchemaMap,
-  TransformDirection,
-  TransformErrorConfig,
-  TransformPair,
-  TransformResult,
-} from './types.js';
+import type { SchemaMap, TransformDirection, TransformPair, TransformResult } from './types.js';
 import type { VersionNormalizer } from './version-normalizer.js';
 
-/**
- * Error thrown when a transform operation fails.
- */
-export class TransformError extends Error {
-  /** Error code for programmatic handling */
-  code: string;
-  /** Additional details about the error */
-  details?: Record<string, any>;
+type TransformFunction = NonNullable<TransformPair['request']>;
+interface TransformStep {
+  key: string;
+  pair: TransformPair;
+  fn: TransformFunction;
+}
 
-  constructor(message: string, code: string = 'TRANSFORM_ERROR', details?: Record<string, any>) {
-    super(message);
+export class TransformError extends Error {
+  constructor(
+    message: string,
+    public code = 'TRANSFORM_ERROR',
+    public details?: Record<string, unknown>,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = 'TransformError';
-    this.code = code;
-    this.details = details;
   }
 }
 
-/**
- * Builds and executes transform chains between API versions.
- *
- * Walks the version graph using normalized order indices, composing
- * adjacent version transforms into a single function via composition.
- * Supports multiple error strategies: reject, fallback, passthrough,
- * and log-and-continue.
- */
+/** Executes adjacent version hops. Caches belong to one transform configuration. */
 export class TransformEngine {
   private transforms: Map<string, TransformPair>;
-  private schemas: SchemaMap;
-  private normalizer: VersionNormalizer;
-  private compiledCache: Map<string, Function>;
+  private chainCache = new Map<string, readonly string[]>();
+  private stepCache = new Map<string, readonly TransformStep[]>();
+  private compiledCache = new Map<string, TransformFunction>();
 
   constructor(
     transforms: Record<string, TransformPair>,
-    schemas: SchemaMap,
-    normalizer: VersionNormalizer,
+    private schemas: SchemaMap,
+    private normalizer: VersionNormalizer,
   ) {
-    this.transforms = new Map(Object.entries(transforms));
-    this.schemas = schemas;
-    this.normalizer = normalizer;
-    this.compiledCache = new Map();
+    this.transforms = new Map(Object.entries(transforms).map(([key, pair]) => [key, { ...pair }]));
   }
 
-  /**
-   * Build a transform chain from source to target version.
-   *
-   * Walks the version graph using normalized order. Each hop between
-   * adjacent versions must have a registered transform keyed as
-   * `{lower}->{higher}`.
-   *
-   * @param source - The source version string
-   * @param target - The target version string
-   * @returns Array of transform keys representing the chain, e.g. `['v1->v2', 'v2->v3']`
-   * @throws {TransformError} If any hop in the chain is missing
-   */
   buildChain(source: string, target: string): string[] {
+    source = this.normalizer.resolveAlias(source);
+    target = this.normalizer.resolveAlias(target);
+    const cacheKey = JSON.stringify([source, target]);
+    const cached = this.chainCache.get(cacheKey);
+    if (cached) return [...cached];
+
     const sourceOrder = this.normalizer.normalize(source);
     const targetOrder = this.normalizer.normalize(target);
-
     if (sourceOrder === null) {
       throw new TransformError(`Unknown source version: "${source}"`, 'INVALID_SOURCE_VERSION', {
         source,
       });
     }
-
     if (targetOrder === null) {
       throw new TransformError(`Unknown target version: "${target}"`, 'INVALID_TARGET_VERSION', {
         target,
       });
     }
 
-    this.validateChain(source, target);
-
-    if (sourceOrder === targetOrder) {
-      return [];
-    }
-
     const chain: string[] = [];
-    let current: string = source;
-
-    if (sourceOrder < targetOrder) {
-      // Walk forward (request direction: old -> new)
-      for (let order = sourceOrder; order < targetOrder; order++) {
-        const next = this.normalizer.denormalize(order + 1);
-        if (!next) {
-          throw new TransformError(`Missing version at order ${order + 1}`, 'MISSING_VERSION', {
-            order: order + 1,
-          });
-        }
-        const key = `${current}->${next}`;
-        if (!this.transforms.has(key)) {
-          throw new TransformError(`Missing transform: ${key}`, 'MISSING_TRANSFORM', {
-            source: current,
-            target: next,
-            key,
-          });
-        }
-        chain.push(key);
-        current = next;
+    const step = sourceOrder < targetOrder ? 1 : -1;
+    let current = source;
+    for (let order = sourceOrder; order !== targetOrder; order += step) {
+      const next = this.normalizer.denormalize(order + step);
+      if (!next) {
+        throw new TransformError(`Missing version at order ${order + step}`, 'MISSING_VERSION', {
+          order: order + step,
+        });
       }
-    } else {
-      // Walk backward (response direction: new -> old)
-      // Response transforms can be registered TWO ways:
-      // 1. As backward key: 'v2->v1' with { response: fn }
-      // 2. As forward key: 'v1->v2' with { request: fnReq, response: fnRes }
-      for (let order = sourceOrder; order > targetOrder; order--) {
-        const prev = this.normalizer.denormalize(order - 1);
-        if (!prev) {
-          throw new TransformError(`Missing version at order ${order - 1}`, 'MISSING_VERSION', {
-            order: order - 1,
-          });
-        }
-        // Try backward key first, then forward key
-        const backwardKey = `${current}->${prev}`;
-        const forwardKey = `${prev}->${current}`;
-        const key = this.transforms.has(backwardKey) ? backwardKey : forwardKey;
-        if (!this.transforms.has(key)) {
-          throw new TransformError(
-            `Missing transform: ${backwardKey} or ${forwardKey}`,
-            'MISSING_TRANSFORM',
-            { source: current, target: prev, backwardKey, forwardKey },
-          );
-        }
-        chain.push(key);
-        current = prev;
+      const directKey = `${current}->${next}`;
+      const forwardKey = `${next}->${current}`;
+      // A backward request-only pair must not hide the forward pair's response transform.
+      const key =
+        step > 0 || this.transforms.get(directKey)?.response
+          ? directKey
+          : this.transforms.has(forwardKey)
+            ? forwardKey
+            : directKey;
+      if (!this.transforms.has(key)) {
+        throw new TransformError(`Missing transform: ${key}`, 'MISSING_TRANSFORM', {
+          source: current,
+          target: next,
+          key,
+        });
       }
+      chain.push(key);
+      current = next;
     }
-
-    return chain;
+    this.chainCache.set(cacheKey, chain);
+    return [...chain];
   }
 
-  /**
-   * Compose transforms for a given source/target/direction into a single function.
-   *
-   * Uses memoization via a cache keyed by `{source}:{target}:{direction}`.
-   * Returns an identity function when `source === target`.
-   *
-   * @param source - Source version
-   * @param target - Target version
-   * @param direction - Transform direction (`'request'` or `'response'`)
-   * @returns A function that applies all transforms in sequence
-   */
-  compile(
+  private getSteps(
     source: string,
     target: string,
     direction: TransformDirection,
-  ): (input: any) => any | Promise<any> {
-    if (source === target) {
-      return (input: any) => input;
+  ): readonly TransformStep[] {
+    const cacheKey = JSON.stringify([
+      this.normalizer.resolveAlias(source),
+      this.normalizer.resolveAlias(target),
+      direction,
+    ]);
+    const cached = this.stepCache.get(cacheKey);
+    if (cached) return cached;
+    const steps: TransformStep[] = [];
+    for (const key of this.buildChain(source, target)) {
+      const pair = this.transforms.get(key);
+      const fn = pair?.[direction];
+      if (pair && fn) steps.push({ key, pair, fn });
     }
+    this.stepCache.set(cacheKey, steps);
+    return steps;
+  }
 
-    const cacheKey = `${source}:${target}:${direction}`;
+  compile(source: string, target: string, direction: TransformDirection): TransformFunction {
+    const cacheKey = JSON.stringify([
+      this.normalizer.resolveAlias(source),
+      this.normalizer.resolveAlias(target),
+      direction,
+    ]);
     const cached = this.compiledCache.get(cacheKey);
-    if (cached) return cached as (input: any) => any | Promise<any>;
-
-    const chain = this.buildChain(source, target);
-    const fnName = direction === 'request' ? 'request' : 'response';
-
-    // Compose functions: for request direction, apply transforms left to right
-    // For response direction, apply transforms in reverse (the chain was built from
-    // current back to client version, but transforms are registered as request-direction)
-    const fns: Function[] = [];
-    if (direction === 'request') {
-      for (const key of chain) {
-        const pair = this.transforms.get(key);
-        const fn = pair?.[fnName];
-        if (fn) fns.push(fn);
+    if (cached) return cached;
+    const steps = this.getSteps(source, target, direction);
+    const composed: TransformFunction = (input) => {
+      let data = input;
+      for (const { fn } of steps) {
+        data =
+          data != null && typeof data.then === 'function'
+            ? Promise.resolve(data).then(fn)
+            : fn(data);
       }
-    } else {
-      // Response transforms: we need the reverse transforms
-      // The chain is built from current -> old, but we need response transforms
-      // registered on those pairs, or inverted request transforms
-      for (const key of chain) {
-        const pair = this.transforms.get(key);
-        const fn = pair?.[fnName];
-        if (fn) fns.push(fn);
-      }
-    }
-
-    const composed = async (input: any): Promise<any> => {
-      let result = input;
-      for (const fn of fns) {
-        result = await fn(result);
-      }
-      return result;
+      return data;
     };
-
     this.compiledCache.set(cacheKey, composed);
     return composed;
   }
 
-  /**
-   * Execute transforms for the given source/target/direction.
-   *
-   * Handles error strategies specified on each transform pair:
-   * - `reject`: throws a `TransformError`
-   * - `fallback`: calls the fallback function with the input
-   * - `passthrough`: returns the input unchanged
-   * - `log-and-continue`: logs the error and continues with partial data
-   *
-   * @param source - Source version
-   * @param target - Target version
-   * @param direction - Transform direction
-   * @param input - The data to transform
-   * @param onError - Optional error callback for logging
-   * @returns Transform result with status and data
-   */
   async execute(
     source: string,
     target: string,
     direction: TransformDirection,
-    input: any,
-    onError?: (err: any) => void,
+    input: unknown,
+    onError?: (err: TransformError) => void,
   ): Promise<TransformResult> {
-    if (source === target) {
+    if (
+      this.normalizer.resolveAlias(source) === this.normalizer.resolveAlias(target) &&
+      this.normalizer.isValid(source)
+    ) {
       return { status: 'success', data: input };
     }
+    const steps = this.getSteps(source, target, direction);
+    if (input == null) return { status: 'success', data: input };
+    let data = input;
+    let status: 'success' | 'fallback' = 'success';
 
-    if (input === null || input === undefined) {
-      return { status: 'success', data: input };
-    }
-
-    const chain = this.buildChain(source, target);
-
-    try {
-      let data = input;
-      const fnName = direction === 'request' ? 'request' : 'response';
-
-      for (const key of chain) {
-        const pair = this.transforms.get(key);
-        if (!pair) continue;
-
-        const fn = pair[fnName];
-        if (!fn) continue;
-
-        const errorConfig = pair.onError;
-
-        try {
-          data = await fn(data);
-        } catch (err: any) {
-          onError?.(err);
-
-          if (errorConfig) {
-            const result = this.applyErrorStrategy(errorConfig, data, err, direction);
-            if (result.status !== 'success' || result.data !== undefined) {
-              return result;
+    for (const { key, pair, fn } of steps) {
+      try {
+        data = await fn(data);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        const strategy = pair.onError;
+        const error = new TransformError(
+          `Transform ${key} (${direction}) failed: ${message}`,
+          strategy?.strategy === 'reject'
+            ? (strategy.errorCode ?? 'TRANSFORM_REJECTED')
+            : 'EXECUTION_ERROR',
+          { key, source, target, direction, originalError: message },
+          { cause },
+        );
+        onError?.(error);
+        switch (strategy?.strategy) {
+          case 'log-and-continue':
+            break;
+          case 'passthrough':
+            return { status: 'passthrough', data };
+          case 'fallback':
+            if (!strategy.fallback) {
+              return {
+                status: 'error',
+                error: {
+                  code: 'FALLBACK_NOT_CONFIGURED',
+                  message: error.message,
+                  details: error.details,
+                },
+              };
             }
-            // For log-and-continue, data stays as-is (partial)
-          } else {
-            // No error config on this pair, re-throw
-            throw err;
-          }
+            try {
+              data = await strategy.fallback(data);
+              status = 'fallback';
+            } catch (fallbackError) {
+              return {
+                status: 'error',
+                error: {
+                  code: 'FALLBACK_FAILED',
+                  message: `Fallback for ${key} failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+                  details: error.details,
+                },
+              };
+            }
+            break;
+          default:
+            return {
+              status: 'error',
+              error: { code: error.code, message: error.message, details: error.details },
+            };
         }
       }
-
-      return { status: 'success', data };
-    } catch (err: any) {
-      const transformError =
-        err instanceof TransformError
-          ? err
-          : new TransformError(err.message ?? 'Transform execution failed', 'EXECUTION_ERROR');
-
-      onError?.(transformError);
-
-      // Check if the overall config has an error handler
-      return {
-        status: 'error',
-        error: {
-          code: transformError.code,
-          message: transformError.message,
-          details: transformError.details,
-        },
-      };
     }
+    return { status, data };
   }
 
-  /**
-   * Apply an error strategy when a transform function fails.
-   */
-  private applyErrorStrategy(
-    strategy: TransformErrorConfig | undefined,
-    input: any,
-    error: Error,
-    _direction: TransformDirection,
-  ): TransformResult {
-    if (!strategy) {
-      throw error;
-    }
-
-    switch (strategy.strategy) {
-      case 'reject':
-        throw new TransformError(error.message, strategy.errorCode ?? 'TRANSFORM_REJECTED', {
-          originalError: error.message,
-        });
-
-      case 'fallback':
-        if (strategy.fallback) {
-          try {
-            const fallbackResult = strategy.fallback(input);
-            return { status: 'fallback', data: fallbackResult };
-          } catch (fallbackErr: any) {
-            throw new TransformError(`Fallback failed: ${fallbackErr.message}`, 'FALLBACK_FAILED', {
-              originalError: error.message,
-              fallbackError: fallbackErr.message,
-            });
-          }
-        }
-        throw new TransformError(error.message, 'FALLBACK_NOT_CONFIGURED', {
-          originalError: error.message,
-        });
-
-      case 'passthrough':
-        return { status: 'passthrough', data: input };
-
-      case 'log-and-continue':
-        // Return undefined data to signal "continue with existing data"
-        return { status: 'success', data: undefined };
-
-      default:
-        throw error;
-    }
-  }
-
-  /**
-   * Validate that the source -> target chain makes sense.
-   *
-   * Ensures the transform direction aligns with the version order:
-   * - Request transforms go from lower order to higher order (old -> new)
-   * - Response transforms go from higher order to lower order (new -> old)
-   *
-   * @throws {TransformError} If the chain direction is invalid
-   */
-  private validateChain(source: string, target: string): void {
-    const sourceOrder = this.normalizer.normalize(source);
-    const targetOrder = this.normalizer.normalize(target);
-
-    if (sourceOrder === null || targetOrder === null) return;
-
-    // No validation needed beyond existence — both forward and backward chains are valid
-  }
-
-  /**
-   * Merge endpoint-specific transforms with the global transforms.
-   *
-   * Endpoint transforms override global transforms for matching keys.
-   * Returns a new `TransformEngine` instance with the merged configuration.
-   *
-   * @param endpointTransforms - Endpoint-specific transform pairs
-   * @returns A new TransformEngine with merged transforms
-   */
   merge(endpointTransforms: Record<string, TransformPair>): TransformEngine {
     const merged = new Map(this.transforms);
-
     for (const [key, pair] of Object.entries(endpointTransforms)) {
       const existing = merged.get(key);
-      if (existing) {
-        merged.set(key, {
-          request: pair.request ?? existing.request,
-          response: pair.response ?? existing.response,
-          onError: pair.onError ?? existing.onError,
-        });
-      } else {
-        merged.set(key, pair);
-      }
+      merged.set(key, {
+        request: pair.request ?? existing?.request,
+        response: pair.response ?? existing?.response,
+        onError: pair.onError ?? existing?.onError,
+      });
     }
-
-    const engine = new TransformEngine(Object.fromEntries(merged), this.schemas, this.normalizer);
-    engine.compiledCache = this.compiledCache;
-    return engine;
+    return new TransformEngine(Object.fromEntries(merged), this.schemas, this.normalizer);
   }
 }
