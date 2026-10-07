@@ -1,3 +1,4 @@
+import { setOwnProperty } from './object.js';
 /**
  * Keep only specified keys from an object.
  * Returns new object with only those keys.
@@ -22,9 +23,9 @@ export function pick(
 ): Record<string, any> {
   if (obj == null) return {};
   const result: Record<string, any> = {};
-  for (const key of Object.keys(obj)) {
-    if (keys.includes(key)) {
-      result[key] = obj[key];
+  for (const key of keys) {
+    if (Object.hasOwn(obj, key)) {
+      setOwnProperty(result, key, obj[key]);
     }
   }
   return result;

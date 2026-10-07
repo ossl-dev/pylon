@@ -1,3 +1,4 @@
+import { setOwnProperty } from './object.js';
 /**
  * Flatten a nested object into parent.
  * Like nest in reverse.
@@ -22,6 +23,7 @@ export function flatten(
 ): Record<string, any> {
   if (obj == null) return {};
 
+  if (!Object.hasOwn(obj, key)) return { ...obj };
   const nested = obj[key];
 
   if (nested == null || typeof nested !== 'object' || Array.isArray(nested)) {
@@ -32,12 +34,12 @@ export function flatten(
 
   for (const k of Object.keys(obj)) {
     if (k !== key) {
-      result[k] = obj[k];
+      setOwnProperty(result, k, obj[k]);
     }
   }
 
   for (const k of Object.keys(nested)) {
-    result[k] = nested[k];
+    setOwnProperty(result, k, nested[k]);
   }
 
   return result;

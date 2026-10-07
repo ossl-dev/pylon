@@ -1,3 +1,4 @@
+import { setOwnProperty } from './object.js';
 /**
  * Nest flat fields into a nested object.
  *
@@ -30,15 +31,15 @@ export function nest(
 
   for (const key of Object.keys(obj)) {
     if (keys.includes(key)) {
-      nested[key] = obj[key];
+      setOwnProperty(nested, key, obj[key]);
       hasNestedKeys = true;
     } else {
-      result[key] = obj[key];
+      setOwnProperty(result, key, obj[key]);
     }
   }
 
   if (hasNestedKeys) {
-    result[newKey] = nested;
+    setOwnProperty(result, newKey, nested);
   }
 
   return result;

@@ -29,7 +29,7 @@ export function coerce(
   fn: (value: any) => any,
 ): Record<string, any> {
   if (obj == null) return {};
-  if (!(key in obj)) return { ...obj };
+  if (!Object.hasOwn(obj, key)) return { ...obj };
   return { ...obj, [key]: fn(obj[key]) };
 }
 

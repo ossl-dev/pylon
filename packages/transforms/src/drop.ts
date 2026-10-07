@@ -1,3 +1,4 @@
+import { setOwnProperty } from './object.js';
 /**
  * Remove specified keys from an object.
  * Returns new object without those keys.
@@ -24,7 +25,7 @@ export function drop(
   const result: Record<string, any> = {};
   for (const key of Object.keys(obj)) {
     if (!keys.includes(key)) {
-      result[key] = obj[key];
+      setOwnProperty(result, key, obj[key]);
     }
   }
   return result;

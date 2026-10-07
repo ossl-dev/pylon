@@ -1,3 +1,4 @@
+import { setOwnProperty } from './object.js';
 import type { DefaultsOptions } from './types.js';
 
 /**
@@ -51,21 +52,34 @@ function mergeDefaults(
   maxDepth: number,
   depth: number,
   deepFill: boolean,
+  seen = new WeakMap<object, WeakMap<object, Record<string, unknown>>>(),
 ): Record<string, any> {
   if (!isObject(obj) || !isObject(defaults) || depth >= maxDepth) {
     return { ...obj };
   }
 
+  const cached = seen.get(obj)?.get(defaults);
+  if (cached) return cached;
   const result: Record<string, any> = { ...obj };
+  let pairs = seen.get(obj);
+  if (!pairs) {
+    pairs = new WeakMap();
+    seen.set(obj, pairs);
+  }
+  pairs.set(defaults, result);
 
   for (const key of Object.keys(defaults)) {
     const defaultVal = defaults[key];
-    const objVal = result[key];
+    const objVal = Object.hasOwn(result, key) ? result[key] : undefined;
 
     if (objVal === undefined || (deepFill && objVal === null)) {
-      result[key] = deepClone(defaultVal);
+      setOwnProperty(result, key, deepClone(defaultVal));
     } else if (isObject(objVal) && isObject(defaultVal)) {
-      result[key] = mergeDefaults(objVal, defaultVal, maxDepth, depth + 1, deepFill);
+      setOwnProperty(
+        result,
+        key,
+        mergeDefaults(objVal, defaultVal, maxDepth, depth + 1, deepFill, seen),
+      );
     }
   }
 
@@ -73,19 +87,26 @@ function mergeDefaults(
 }
 
 function isObject(val: unknown): val is Record<string, any> {
-  return val !== null && typeof val === 'object' && !Array.isArray(val);
+  return (
+    val !== null &&
+    typeof val === 'object' &&
+    (Object.getPrototypeOf(val) === Object.prototype || Object.getPrototypeOf(val) === null)
+  );
 }
 
-function deepClone<T>(val: T): T {
-  if (Array.isArray(val)) {
-    return val.map(deepClone) as unknown as T;
+function deepClone<T>(val: T, seen = new WeakMap<object, unknown>()): T {
+  if (val instanceof Date) return new Date(val.getTime()) as T;
+  if (!Array.isArray(val) && !isObject(val)) return val;
+  const cached = seen.get(val);
+  if (cached) return cached as T;
+  const result: Record<string, unknown> | unknown[] = Array.isArray(val) ? [] : {};
+  seen.set(val, result);
+  for (const key of Object.keys(val)) {
+    setOwnProperty(
+      result as Record<string, unknown>,
+      key,
+      deepClone((val as Record<string, unknown>)[key], seen),
+    );
   }
-  if (isObject(val)) {
-    const result: Record<string, any> = {};
-    for (const key of Object.keys(val)) {
-      result[key] = deepClone(val[key]);
-    }
-    return result as T;
-  }
-  return val;
+  return result as T;
 }

@@ -1,3 +1,4 @@
+import { setOwnProperty } from './object.js';
 import type { RenameMap } from './types.js';
 
 /**
@@ -22,17 +23,15 @@ export function rename(obj: Record<string, any>, mapping: RenameMap): Record<str
   if (obj == null) return {};
   const result: Record<string, any> = {};
   for (const key of Object.keys(obj)) {
-    if (key in mapping) {
+    if (Object.hasOwn(mapping, key)) {
       const newKey = mapping[key];
-      // newKey is string|undefined due to noUncheckedIndexedAccess,
-      // but `key in mapping` guarantees it exists at runtime.
       if (newKey !== undefined) {
-        result[newKey] = obj[key];
+        setOwnProperty(result, newKey, obj[key]);
       } else {
-        result[key] = obj[key];
+        setOwnProperty(result, key, obj[key]);
       }
     } else {
-      result[key] = obj[key];
+      setOwnProperty(result, key, obj[key]);
     }
   }
   return result;
