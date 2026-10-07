@@ -103,8 +103,9 @@ async function readBody(c: {
  * @param options - Optional endpoint override
  */
 export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareHandler {
-  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
+  const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return async (c, next) => {
+    const pylon = root.forRoute(c.req.method, c.req.path);
     /* ---- REQUEST PHASE ---- */
 
     // 1. Extract request components
@@ -138,13 +139,10 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
 
     // 6. Replace body cache so downstream `c.req.json()` / `c.req.text()`
     //    receives the *transformed* body rather than the original.
-    if (reqResult.body !== undefined && body !== undefined) {
-      const serialized =
-        typeof reqResult.body === 'string' ? reqResult.body : JSON.stringify(reqResult.body);
+    if (reqResult.body !== undefined && body !== undefined && reqResult.body !== body) {
       // Hono stores Promises in bodyCache even though the TS types say `string`.
       // biome-ignore lint/suspicious/noExplicitAny: bodyCache stores Promises at runtime
       (c.req as any).bodyCache = {
-        text: Promise.resolve(serialized),
         json: Promise.resolve(reqResult.body),
       };
     }
@@ -159,7 +157,11 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     }
 
     const clientVersion: string | undefined = c.get('pylon-client-version');
-    if (!clientVersion || clientVersion === pylon.current) {
+    if (
+      !clientVersion ||
+      c.req.method === 'HEAD' ||
+      !pylon.needsResponseProcessing(clientVersion, c.res.status)
+    ) {
       // No version mismatch — nothing to reverse-transform
       return;
     }
@@ -192,6 +194,7 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
       resHeaders,
       transformsApplied,
       debug,
+      res.status,
     );
 
     delete resResult.headers['content-length'];

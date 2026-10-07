@@ -297,10 +297,9 @@ describe('Pylon', () => {
       expect(scoped.config.transforms['v1->v2']).toBeDefined();
     });
 
-    it('returns same instance for unknown endpoint', () => {
+    it('rejects unknown endpoint names', () => {
       const pylon = createPylon();
-      const scoped = pylon.forEndpoint('nonexistent');
-      expect(scoped).toBeInstanceOf(Pylon);
+      expect(() => pylon.forEndpoint('nonexistent')).toThrow('Unknown Pylon endpoint');
     });
   });
 

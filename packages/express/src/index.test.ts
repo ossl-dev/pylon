@@ -56,7 +56,7 @@ function createTestPylon(): Pylon {
     },
     versioning: {
       sources: [{ type: 'header', name: 'X-API-Version' }],
-      headers: { apiVersion: true, deprecation: true, debug: 'always' },
+      headers: { apiVersion: true, deprecation: true },
     },
     debug: { enabled: true },
   });

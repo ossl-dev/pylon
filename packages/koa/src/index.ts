@@ -40,11 +40,12 @@ declare module 'koa' {
  * 3. Set version headers on response
  */
 export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
-  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
+  const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return async (
     ctx: ParameterizedContext<DefaultState, DefaultContext>,
     next: () => Promise<unknown>,
   ) => {
+    const pylon = root.forRoute(ctx.method, ctx.path);
     // 1. Extract request data
     const headers = extractHeaders(ctx);
     const query = extractQuery(ctx);
@@ -103,7 +104,12 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
     await next();
 
     // 5. Transform response back to client version
-    if (ctx.pylonClientVersion !== pylon.current && ctx.body !== undefined && ctx.body !== null) {
+    if (
+      ctx.method !== 'HEAD' &&
+      pylon.needsResponseProcessing(ctx.pylonClientVersion, ctx.status) &&
+      ctx.body !== undefined &&
+      ctx.body !== null
+    ) {
       try {
         if (
           ctx.body instanceof Uint8Array ||
@@ -128,6 +134,7 @@ export function pylonKoa(pylon: Pylon, options?: PylonKoaOptions): Middleware {
           {},
           ctx.pylonTransformInfo?.transformsApplied ?? [],
           ctx.pylonTransformInfo?.debugInfo as DebugInfo | undefined,
+          ctx.status,
         );
 
         ctx.body = responseResult.body;

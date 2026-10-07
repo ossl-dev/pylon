@@ -17,7 +17,10 @@ export class VersionNormalizer {
     if (!config) this.add({ name: current, order: 1 });
     else if (Array.isArray(config)) {
       const orders = new Set<number>();
-      for (const [index, version] of [...config].sort((a, b) => a.order - b.order).entries()) {
+      const definitions = config.map((v, index) =>
+        typeof v === 'string' ? { name: v, order: index + 1 } : v,
+      );
+      for (const [index, version] of definitions.sort((a, b) => a.order - b.order).entries()) {
         if (!Number.isFinite(version.order) || orders.has(version.order))
           throw new Error(`Invalid or duplicate version order: ${version.order}`);
         orders.add(version.order);

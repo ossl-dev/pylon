@@ -19,8 +19,8 @@ export interface VersionDefinition {
 export type SchemaMap = Record<string, z.ZodTypeAny>;
 
 export interface TransformPair<I = any, O = any> {
-  request?: (input: I) => O | Promise<O>;
-  response?: (input: O) => I | Promise<I>;
+  request?: ((input: I) => O | Promise<O>) | 'identity';
+  response?: ((input: O) => I | Promise<I>) | 'identity';
   onError?: TransformErrorConfig;
 }
 
@@ -44,7 +44,6 @@ export interface NegotiationConfig {
 export interface ResponseHeadersConfig {
   apiVersion?: boolean;
   deprecation?: boolean;
-  debug?: 'none' | 'development' | 'always';
 }
 
 export interface VersioningConfig {
@@ -53,10 +52,21 @@ export interface VersioningConfig {
   onInvalid?: InvalidStrategy;
   negotiation?: NegotiationConfig;
   headers?: ResponseHeadersConfig;
-  rateLimit?: Record<string, { requests: number; window: string }>;
 }
 
+export interface VersionContract {
+  request?: z.ZodTypeAny;
+  response?: z.ZodTypeAny;
+}
+
+export type ContractMap = Record<string, VersionContract>;
+export type HTTPMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+
 export interface EndpointConfig {
+  method?: HTTPMethod;
+  path?: string;
+  status?: number;
+  contracts?: ContractMap;
   current?: string;
   versioning?: false;
   minVersion?: string;
@@ -66,9 +76,6 @@ export interface EndpointConfig {
 }
 
 export interface ObservabilityConfig {
-  metrics?: boolean;
-  logs?: boolean;
-  traces?: boolean;
   onTransform?: (info: TransformEvent) => void;
   onError?: (error: TransformErrorEvent) => void;
 }
@@ -119,6 +126,7 @@ export type VersionsConfig =
       end?: string;
     }
   | VersionDefinition[]
+  | string[]
   | StripePreset
   | CustomVersionsConfig;
 
@@ -128,12 +136,16 @@ export interface PylonConfig {
   versions?: VersionsConfig;
   schemas: SchemaMap;
   transforms: Record<string, TransformPair>;
+  contracts?: ContractMap;
   versioning?: VersioningConfig;
   endpoints?: Record<string, EndpointConfig>;
   observability?: ObservabilityConfig;
   debug?: DebugConfig;
   onTransformError?: (error: TransformErrorEvent) => void;
 }
+
+export type PylonOptions = Omit<PylonConfig, 'schemas' | 'transforms'> &
+  Partial<Pick<PylonConfig, 'schemas' | 'transforms'>>;
 
 export interface VersionResult {
   version: string;

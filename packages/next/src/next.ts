@@ -35,7 +35,7 @@ export interface PylonNextOptions {
  * ```
  */
 export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
-  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
+  const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   // biome-ignore lint/suspicious/noExplicitAny: decorator wrapping unknown handler signatures
   return function wrap<T extends (...args: any[]) => any>(handler: T): T {
     // biome-ignore lint/suspicious/noExplicitAny: args[0] is narrowed to NextRequest below
@@ -52,6 +52,7 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
       });
 
       const url = new URL(request.url);
+      const pylon = root.forRoute(request.method, url.pathname);
       const query: Record<string, string> = {};
       url.searchParams.forEach((value, key) => {
         query[key] = value;
@@ -87,7 +88,8 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
       }
 
       // --- Create transformed request for downstream handler ---
-      const transformedRequest = createTransformedRequest(request, result.body);
+      const transformedRequest =
+        result.body === body ? request : createTransformedRequest(request, result.body);
 
       // --- Invoke the original route handler ---
       const response = await handler(transformedRequest, ...args.slice(1));
@@ -104,7 +106,10 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
         responseHeaders[key] = value;
       });
 
-      if (clientVersion !== pylon.current) {
+      if (
+        request.method !== 'HEAD' &&
+        pylon.needsResponseProcessing(clientVersion, response.status)
+      ) {
         // Only attempt JSON transformation when the response is actually JSON
         const contentType = responseHeaders['content-type'] ?? '';
         if (contentType.includes('application/json')) {
@@ -115,6 +120,7 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
             responseHeaders,
             result.debug?.transformsApplied ?? [],
             result.debug,
+            response.status,
           );
           delete responseHeaders['content-length'];
           delete responseResult.headers['content-length'];

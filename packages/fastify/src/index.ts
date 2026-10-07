@@ -9,6 +9,7 @@ export interface PylonFastifyOptions {
 
 /** @internal Per-request metadata carried between lifecycle hooks. */
 interface RequestMeta {
+  pylon: Pylon;
   clientVersion: string;
   transformsApplied: string[];
   debug?: DebugInfo;
@@ -52,7 +53,7 @@ function pylonFastifyPlugin(
   options: { pylon: Pylon; endpoint?: string },
   done: (err?: Error) => void,
 ): void {
-  const pylon = options.endpoint ? options.pylon.forEndpoint(options.endpoint) : options.pylon;
+  const root = options.endpoint ? options.pylon.forEndpoint(options.endpoint) : options.pylon;
   const endpoint = options.endpoint;
 
   // ── preHandler ──────────────────────────────────────────────────
@@ -64,6 +65,7 @@ function pylonFastifyPlugin(
   // preHandler is used instead of onRequest because Fastify does not
   // parse the request body until after the onRequest phase.
   fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    const pylon = root.forRoute(request.method, request.url);
     try {
       const result = await pylon.processRequest(
         request.headers as Record<string, string>,
@@ -76,6 +78,7 @@ function pylonFastifyPlugin(
       const isError = result.transformResult.status === 'error';
 
       metaMap.set(request, {
+        pylon,
         clientVersion: result.version,
         transformsApplied: result.debug?.transformsApplied ?? [],
         debug: result.debug,
@@ -110,12 +113,21 @@ function pylonFastifyPlugin(
     async (request: FastifyRequest, reply: FastifyReply, payload: unknown) => {
       const meta = metaMap.get(request);
       if (!meta || meta.pylonError) {
-        return;
+        return payload;
       }
+      const pylon = meta.pylon;
+      if (
+        request.method === 'HEAD' ||
+        !pylon.needsResponseProcessing(meta.clientVersion, reply.statusCode)
+      )
+        return payload;
 
       // Only intercept serialised JSON payloads.
-      if (typeof payload !== 'string') {
-        return;
+      if (
+        typeof payload !== 'string' ||
+        !String(reply.getHeader('content-type') ?? '').includes('json')
+      ) {
+        return payload;
       }
 
       try {
@@ -127,6 +139,7 @@ function pylonFastifyPlugin(
           {},
           meta.transformsApplied,
           meta.debug,
+          reply.statusCode,
         );
 
         for (const [key, value] of Object.entries(result.headers)) {
@@ -137,8 +150,11 @@ function pylonFastifyPlugin(
         reply.removeHeader('content-length');
         return JSON.stringify(result.body);
       } catch {
-        // Graceful degradation: send the current-version payload.
-        return payload;
+        void reply.code(500).type('application/json');
+        reply.removeHeader('content-length');
+        return JSON.stringify({
+          error: { code: 'RESPONSE_TRANSFORM_FAILED', message: 'Response processing failed' },
+        });
       }
     },
   );

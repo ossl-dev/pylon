@@ -1,6 +1,6 @@
 import type { Server } from 'node:http';
 import type { PylonConfig } from '@ossl/pylon-core';
-import { Pylon } from '@ossl/pylon-core';
+import { defineEndpoint, Pylon } from '@ossl/pylon-core';
 import { pylonExpress } from '@ossl/pylon-express';
 import { pylonFastify } from '@ossl/pylon-fastify';
 import { pylonHono } from '@ossl/pylon-hono';
@@ -291,6 +291,67 @@ for (const [name, adapter] of Object.entries(adapters)) {
     it('preserves application error status codes', async () => {
       const client = await adapter(createPylon(), 'application-error');
       expect((await client.send('v2', { fullName: 'Ada' })).status).toBe(409);
+    });
+
+    function contracts(response = z.object({ fullName: z.string(), id: z.number() })) {
+      const users = defineEndpoint({
+        method: 'POST',
+        path: '/users',
+        contracts: {
+          v1: {
+            request: z.object({ name: z.string() }),
+            response: z.object({ name: z.string(), id: z.number() }),
+          },
+          v2: { request: z.object({ fullName: z.string() }), response },
+        },
+        transforms: {
+          'v1->v2': {
+            request: (input) => ({ fullName: input.name }),
+            response: (output) => ({ name: output.fullName, id: output.id }),
+          },
+        },
+      });
+      return new Pylon({ current: 'v2', versions: ['v1', 'v2'], endpoints: { users } });
+    }
+
+    it('automatically selects endpoint contracts and preserves lossy historical responses', async () => {
+      const client = await adapter(contracts());
+      expect(await (await client.send('v1', { name: 'Ada' })).json()).toEqual({
+        name: 'Ada',
+        id: 1,
+      });
+      expect(await (await client.send('v2', { fullName: 'Ada' })).json()).toEqual({
+        fullName: 'Ada',
+        id: 1,
+      });
+    });
+
+    it('validates old input before invoking controller', async () => {
+      const client = await adapter(contracts());
+      const response = await client.send('v1', { name: 123 });
+      expect(response.status).toBe(422);
+      expect(client.calls()).toBe(0);
+    });
+
+    it.each(['v1', 'v2'])('validates successful controller output for %s', async (version) => {
+      const client = await adapter(
+        contracts(z.object({ fullName: z.string(), id: z.number().min(10) })),
+      );
+      const response = await client.send(
+        version,
+        version === 'v1' ? { name: 'Ada' } : { fullName: 'Ada' },
+      );
+      expect(response.status).toBe(500);
+      expect(await response.json()).toHaveProperty('error.code', 'RESPONSE_TRANSFORM_FAILED');
+    });
+
+    it('preserves application errors and 204 responses with contracts enabled', async () => {
+      const client = await adapter(contracts(), 'application-error');
+      const response = await client.send('v1', { name: 'Ada' });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'conflict' });
+      const empty = await adapter(contracts(), 'empty');
+      expect((await empty.send('v1', { name: 'Ada' })).status).toBe(204);
     });
   });
 }

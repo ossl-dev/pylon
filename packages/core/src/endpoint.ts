@@ -15,19 +15,23 @@ import type { EndpointConfig, PylonConfig } from './types.js';
 export function mergeConfigs(global: PylonConfig, endpoint: EndpointConfig): PylonConfig {
   return {
     ...global,
+    endpoints: undefined,
+    contracts: endpoint.contracts ?? global.contracts,
     current: endpoint.current ?? global.current,
     defaultVersion:
       endpoint.versioning === false ? (endpoint.current ?? global.current) : global.defaultVersion,
     schemas: { ...global.schemas, ...endpoint.schemas },
-    transforms: Object.fromEntries(
-      Object.keys({ ...global.transforms, ...endpoint.transforms }).map((key) => [
-        key,
-        {
-          ...global.transforms[key],
-          ...endpoint.transforms?.[key],
-        },
-      ]),
-    ),
+    transforms: endpoint.contracts
+      ? (endpoint.transforms ?? {})
+      : Object.fromEntries(
+          Object.keys({ ...global.transforms, ...endpoint.transforms }).map((key) => [
+            key,
+            {
+              ...global.transforms[key],
+              ...endpoint.transforms?.[key],
+            },
+          ]),
+        ),
     versioning:
       endpoint.versioning === false ? { sources: [], onMissing: 'use-default' } : global.versioning,
   };

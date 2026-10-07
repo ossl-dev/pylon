@@ -1,4 +1,6 @@
-import type { PylonConfig, TransformPair } from './types.js';
+import { validateContracts } from './contracts.js';
+import type { PylonConfig, PylonOptions, TransformPair } from './types.js';
+import { VersionNormalizer } from './version-normalizer.js';
 
 /**
  * Type-safe config helper with full inference.
@@ -19,8 +21,11 @@ import type { PylonConfig, TransformPair } from './types.js';
  * @param config - The Pylon configuration object
  * @returns The same config object with full type inference
  */
-export function defineConfig(config: PylonConfig): PylonConfig {
-  return config;
+export function defineConfig<const C extends PylonOptions>(config: C): C & PylonConfig {
+  return Object.assign(config, {
+    schemas: config.schemas ?? {},
+    transforms: config.transforms ?? {},
+  });
 }
 
 /**
@@ -77,8 +82,12 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
       }
 
       for (const direction of ['request', 'response'] as const) {
-        if (pair[direction] !== undefined && typeof pair[direction] !== 'function') {
-          errors.push(`Transform "${key}" ${direction} must be a function`);
+        if (
+          pair[direction] !== undefined &&
+          typeof pair[direction] !== 'function' &&
+          pair[direction] !== 'identity'
+        ) {
+          errors.push(`Transform "${key}" ${direction} must be a function or 'identity'`);
         }
       }
       if (!pair.request && !pair.response) {
@@ -155,10 +164,69 @@ export function validateConfig(config: PylonConfig): { valid: boolean; errors: s
       config.current &&
       !referenced.has(config.current) &&
       !config.schemas?.[config.current] &&
-      !(Array.isArray(config.versions) && config.versions.some((v) => v.name === config.current)) &&
+      !(
+        Array.isArray(config.versions) &&
+        config.versions.some((v) => (typeof v === 'string' ? v : v.name) === config.current)
+      ) &&
       Object.keys(config.transforms).length > 0
     ) {
       errors.push(`Current version "${config.current}" does not appear in any transform`);
+    }
+  }
+
+  const unsupported = [
+    [config.versioning, 'rateLimit'],
+    [config.versioning?.headers, 'debug'],
+    [config.observability, 'metrics'],
+    [config.observability, 'logs'],
+    [config.observability, 'traces'],
+  ] as const;
+  for (const [options, key] of unsupported) {
+    if (options && Object.hasOwn(options, key))
+      errors.push(`Unsupported option "${key}"; use debug.enabled or observability callbacks`);
+  }
+  if (
+    errors.length === 0 &&
+    (config.contracts || Object.values(config.endpoints ?? {}).some((e) => e.contracts))
+  ) {
+    try {
+      const normalizer = new VersionNormalizer(config.versions, config.current);
+      if (config.contracts)
+        errors.push(
+          ...validateContracts(
+            { contracts: config.contracts, transforms: config.transforms },
+            config.current,
+            normalizer,
+          ),
+        );
+      const routes = new Set<string>();
+      for (const [name, endpoint] of Object.entries(config.endpoints ?? {})) {
+        if (!endpoint.contracts) continue;
+        if (
+          !endpoint.method ||
+          !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(endpoint.method)
+        )
+          errors.push(`Endpoint "${name}" requires a valid HTTP method`);
+        if (!endpoint.path?.startsWith('/') || /[?#{}*]/.test(endpoint.path))
+          errors.push(
+            `Endpoint "${name}" requires an absolute route path with optional :name parameters`,
+          );
+        const route = `${endpoint.method} ${endpoint.path?.replace(/:[A-Za-z_][\w]*/g, ':param').replace(/\/$/, '')}`;
+        if (routes.has(route)) errors.push(`Duplicate endpoint route: ${route}`);
+        routes.add(route);
+        if (
+          endpoint.status !== undefined &&
+          (!Number.isInteger(endpoint.status) || endpoint.status < 200 || endpoint.status >= 300)
+        )
+          errors.push(`Endpoint "${name}" status must be a successful HTTP status`);
+        errors.push(
+          ...validateContracts(endpoint, config.current, normalizer).map(
+            (error) => `Endpoint "${name}": ${error}`,
+          ),
+        );
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
     }
   }
 

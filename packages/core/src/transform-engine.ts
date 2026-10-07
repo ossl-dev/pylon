@@ -1,7 +1,7 @@
 import type { SchemaMap, TransformDirection, TransformPair, TransformResult } from './types.js';
 import type { VersionNormalizer } from './version-normalizer.js';
 
-type TransformFunction = NonNullable<TransformPair['request']>;
+type TransformFunction = Exclude<NonNullable<TransformPair['request']>, 'identity'>;
 interface TransformStep {
   key: string;
   pair: TransformPair;
@@ -104,7 +104,7 @@ export class TransformEngine {
     for (const key of this.buildChain(source, target)) {
       const pair = this.transforms.get(key);
       const fn = pair?.[direction];
-      if (pair && fn) steps.push({ key, pair, fn });
+      if (pair && typeof fn === 'function') steps.push({ key, pair, fn });
     }
     this.stepCache.set(cacheKey, steps);
     return steps;
@@ -153,7 +153,8 @@ export class TransformEngine {
 
     for (const { key, pair, fn } of steps) {
       try {
-        data = await fn(data);
+        const output = fn(data);
+        data = output != null && typeof output.then === 'function' ? await output : output;
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         const strategy = pair.onError;

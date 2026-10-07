@@ -228,14 +228,14 @@ describe('generateConfigContent', () => {
       endpoints: {
         'users.create': { schemas: { v1: z.object({ name: z.string() }) } },
       },
-      observability: { metrics: true },
+      observability: { onTransform: () => {} },
     });
     const content = generateConfigContent(config);
     expect(content).toContain('  versioning: {');
     expect(content).toContain('"sources": [');
     expect(content).toContain('  endpoints: {');
     expect(content).toContain('  observability: {');
-    expect(content).toContain('"metrics": true');
+    expect(content).not.toContain('"metrics"');
   });
 });
 

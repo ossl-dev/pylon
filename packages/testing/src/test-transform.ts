@@ -46,5 +46,5 @@ export async function testTransform(
     );
   }
 
-  return await fn(input);
+  return fn === 'identity' ? input : await fn(input);
 }

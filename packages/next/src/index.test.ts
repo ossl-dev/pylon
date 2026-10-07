@@ -64,7 +64,7 @@ function createTestPylon(overrides?: Partial<{ debug: boolean }>): Pylon {
     },
     versioning: {
       sources: [{ type: 'header', name: 'X-API-Version' }],
-      headers: { apiVersion: true, deprecation: true, debug: 'always' },
+      headers: { apiVersion: true, deprecation: true },
     },
     debug: { enabled: overrides?.debug ?? true },
   });

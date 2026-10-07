@@ -1,4 +1,6 @@
 export { defineConfig, validateConfig } from './config.js';
+export type { ContractTransforms, EndpointInput, EndpointOutput } from './contracts.js';
+export { defineEndpoint } from './contracts.js';
 export { createEndpoint, matchEndpoint, mergeConfigs } from './endpoint.js';
 export { Pylon } from './pylon.js';
 export { TransformEngine, TransformError } from './transform-engine.js';

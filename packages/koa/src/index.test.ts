@@ -67,7 +67,7 @@ function createTestPylon(overrides?: Partial<{ debug: boolean }>): Pylon {
     },
     versioning: {
       sources: [{ type: 'header', name: 'X-API-Version' }],
-      headers: { apiVersion: true, deprecation: true, debug: 'always' },
+      headers: { apiVersion: true, deprecation: true },
     },
     debug: { enabled: overrides?.debug ?? true },
   });
@@ -648,6 +648,7 @@ describe('pylonKoa edge cases', () => {
   it('sets endpoint option via pylonKoa options', async () => {
     const app = new Koa();
     const pylon = createTestPylon();
+    pylon.config.endpoints = { 'users.create': {} };
     app.use(jsonBodyParser());
     app.use(pylonKoa(pylon, { endpoint: 'users.create' }));
     app.use(async (ctx) => {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { validateConfig } from './config.js';
+import { routePattern } from './contracts.js';
 import { mergeConfigs } from './endpoint.js';
 import { TransformEngine, TransformError } from './transform-engine.js';
 import type {
@@ -7,6 +8,7 @@ import type {
   EndpointConfig,
   ProcessRequestOptions,
   PylonConfig,
+  PylonOptions,
   RollbackConfig,
   RollbackStatus,
   TransformResult,
@@ -43,22 +45,26 @@ export class Pylon {
   private retired = new Set<string>();
   private endpointCache = new Map<string, Pylon>();
   private endpointPolicy?: EndpointConfig;
+  private endpointName?: string;
+  private routes: Array<{ name: string; method: string; path: RegExp; parameters: number }> = [];
+  private staticRoutes = new Map<string, string>();
   /** Mutable deprecation state tracked at the Pylon instance level */
   private deprecations: Map<
     string,
     { deprecated: boolean; sunsetDate?: string; migrationGuide?: string }
   >;
 
-  constructor(config: PylonConfig) {
+  constructor(options: PylonOptions) {
+    const config: PylonConfig = { schemas: {}, transforms: {}, ...options };
     const validation = validateConfig(config);
     if (!validation.valid) {
       throw new Error(`Pylon config validation failed:\n  ${validation.errors.join('\n  ')}`);
     }
 
     this.config = config;
-    this.current = config.current;
-    this.defaultVersion = config.defaultVersion ?? config.current;
     this.normalizer = new VersionNormalizer(config.versions, config.current);
+    this.current = this.normalizer.resolveAlias(config.current);
+    this.defaultVersion = this.normalizer.resolveAlias(config.defaultVersion ?? config.current);
     for (const version of [this.current, this.defaultVersion]) {
       if (!this.normalizer.isValid(version))
         throw new Error(`Configured version "${version}" is not in the version definitions`);
@@ -76,6 +82,21 @@ export class Pylon {
           migrationGuide: version.migrationGuide,
         });
     }
+    for (const [name, endpoint] of Object.entries(config.endpoints ?? {})) {
+      if (!endpoint.contracts || !endpoint.method || !endpoint.path) continue;
+      const parameters = endpoint.path.split('/').filter((part) => part.startsWith(':')).length;
+      if (!parameters)
+        this.staticRoutes.set(`${endpoint.method} ${endpoint.path.replace(/\/$/, '')}`, name);
+      else
+        this.routes.push({
+          name,
+          method: endpoint.method,
+          path: routePattern(endpoint.path),
+          parameters,
+        });
+      this.forEndpoint(name);
+    }
+    this.routes.sort((a, b) => a.parameters - b.parameters);
   }
 
   /**
@@ -111,7 +132,7 @@ export class Pylon {
     version: string;
     transformResult: TransformResult;
   }> {
-    if (options?.endpoint) {
+    if (options?.endpoint && options.endpoint !== this.endpointName) {
       const scoped = this.forEndpoint(options.endpoint);
       if (scoped !== this)
         return scoped.processRequest(headers, path, query, body, {
@@ -167,6 +188,36 @@ export class Pylon {
     const effectiveVersion =
       rollback?.mode === 'downgrade' ? rollback.fallbackVersion : clientVersion;
 
+    if (this.config.contracts) {
+      const contract = this.config.contracts[effectiveVersion];
+      if (!contract)
+        return this.requestError(
+          clientVersion,
+          'UNSUPPORTED_ENDPOINT_VERSION',
+          `Endpoint has no contract for version "${effectiveVersion}"`,
+          400,
+        );
+      try {
+        const parsed = await (contract.request ?? z.undefined()).safeParseAsync(body);
+        if (!parsed.success)
+          return this.requestError(
+            clientVersion,
+            'VALIDATION_ERROR',
+            'Request body validation failed',
+            422,
+            { issues: parsed.error.issues },
+          );
+        body = parsed.data;
+      } catch (error) {
+        return this.requestError(
+          clientVersion,
+          'VALIDATION_FAILED',
+          error instanceof Error ? error.message : String(error),
+          500,
+        );
+      }
+    }
+
     // 2. Transform request to current version
     let transformsApplied: string[] = [];
     let transformResult: TransformResult = { status: 'success', data: body };
@@ -214,13 +265,23 @@ export class Pylon {
     }
 
     // 3. Validate against current version's schema
-    const schema = this.config.schemas[this.current];
-    if (schema) {
+    const schema = this.config.contracts
+      ? (this.config.contracts[this.current]?.request ?? z.undefined())
+      : this.config.schemas[this.current];
+    if (schema && (!this.config.contracts || effectiveVersion !== this.current)) {
       try {
-        const parsed = schema.parse(transformedBody);
+        const parsed = await schema.parseAsync(transformedBody);
         transformedBody = parsed;
       } catch (err: any) {
         if (err instanceof z.ZodError) {
+          if (this.config.contracts)
+            return this.requestError(
+              clientVersion,
+              'REQUEST_CONTRACT_FAILED',
+              'Request migration produced an invalid current contract',
+              500,
+              { issues: err.issues },
+            );
           return {
             status: 422,
             headers: {
@@ -324,6 +385,7 @@ export class Pylon {
     responseHeaders: Record<string, string>,
     transformsApplied: string[],
     debug?: DebugInfo,
+    status = 200,
   ): Promise<{
     status?: number;
     headers: Record<string, string>;
@@ -332,10 +394,13 @@ export class Pylon {
   }> {
     const startTime = Date.now();
 
+    if (!this.needsResponseProcessing(clientVersion, status))
+      return { headers: responseHeaders, body: responseBody, debug };
+
     clientVersion = this.normalizer.resolveAlias(clientVersion);
     const rollback = this.getRollback(clientVersion);
     const targetVersion = rollback?.mode === 'downgrade' ? rollback.fallbackVersion : clientVersion;
-    if (!clientVersion || targetVersion === this.current) {
+    if (!this.config.contracts && (!clientVersion || targetVersion === this.current)) {
       return {
         headers: responseHeaders,
         body: responseBody,
@@ -346,11 +411,15 @@ export class Pylon {
     let transformedBody = responseBody;
 
     try {
+      if (this.config.contracts)
+        transformedBody = await (
+          this.config.contracts[this.current]?.response ?? z.undefined()
+        ).parseAsync(transformedBody);
       const result = await this.engine.execute(
         this.current,
         targetVersion,
         'response',
-        responseBody,
+        transformedBody,
         (err) =>
           this.config.onTransformError?.({
             source: this.current,
@@ -368,6 +437,12 @@ export class Pylon {
         );
       }
       transformedBody = result.data;
+      if (this.config.contracts && targetVersion !== this.current) {
+        const contract = this.config.contracts[targetVersion];
+        if (!contract)
+          throw new Error(`Endpoint has no response contract for version "${targetVersion}"`);
+        transformedBody = await (contract.response ?? z.undefined()).parseAsync(transformedBody);
+      }
     } catch (err: any) {
       this.config.observability?.onError?.({
         source: this.current,
@@ -411,6 +486,25 @@ export class Pylon {
       body: transformedBody,
       debug: this.config.debug?.enabled ? updatedDebug : undefined,
     };
+  }
+
+  /** Errors and bodyless responses pass through. Current contracts still validate handler output. */
+  needsResponseProcessing(version: string, status = 200): boolean {
+    if (status < 200 || status >= 300 || status === 204 || status === 205) return false;
+    const canonical = this.normalizer.resolveAlias(version);
+    const target =
+      this.getRollback(canonical)?.mode === 'downgrade'
+        ? this.getRollback(canonical)!.fallbackVersion
+        : canonical;
+    return Boolean(this.config.contracts) || target !== this.current;
+  }
+
+  forRoute(method: string, path: string): Pylon {
+    const pathname = path.split('?')[0] ?? path;
+    const exact = this.staticRoutes.get(`${method} ${pathname.replace(/\/$/, '')}`);
+    if (exact) return this.forEndpoint(exact);
+    const route = this.routes.find((route) => route.method === method && route.path.test(pathname));
+    return route ? this.forEndpoint(route.name) : this;
   }
 
   /**
@@ -676,40 +770,31 @@ export class Pylon {
    * @returns A new Pylon instance for the endpoint
    */
   forEndpoint(endpoint: string, config?: EndpointConfig): Pylon {
+    if (endpoint === this.endpointName && !config) return this;
     const cached = this.endpointCache.get(endpoint);
     if (cached && !config) return cached;
     const endpointConfig = config ?? this.config.endpoints?.[endpoint];
     if (!endpointConfig) {
-      return this;
+      throw new Error(`Unknown Pylon endpoint: "${endpoint}"`);
     }
 
     const merged = mergeConfigs(this.config, endpointConfig);
     const scoped = new Pylon(merged);
-    scoped.endpointPolicy = endpointConfig;
+    scoped.endpointName = endpoint;
+    const minimum =
+      endpointConfig.minVersion ??
+      (endpointConfig.contracts
+        ? this.normalizer
+            .listVersions()
+            .find((v) => Object.hasOwn(endpointConfig.contracts!, v.name))?.name
+        : undefined);
+    scoped.endpointPolicy = { ...endpointConfig, minVersion: minimum };
     scoped.rollbacks = this.rollbacks;
     scoped.unpublished = this.unpublished;
     scoped.retired = this.retired;
     scoped.deprecations = this.deprecations;
     if (!config) this.endpointCache.set(endpoint, scoped);
     return scoped;
-  }
-
-  /**
-   * Get the inferred TypeScript type for a version's schema.
-   *
-   * This is a type-level helper — at runtime it simply returns `undefined`.
-   * Use it to extract the input type from a version's Zod schema.
-   *
-   * @example
-   * ```ts
-   * type V1Input = typeof pylon.infer<'v1'>;
-   * ```
-   *
-   * @param _version - The version string
-   * @returns The inferred type (undefined at runtime)
-   */
-  infer<T = any>(_version: string): T {
-    return undefined as unknown as T;
   }
 
   /**

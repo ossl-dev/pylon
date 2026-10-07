@@ -233,7 +233,10 @@ export function serializeVersions(versions: VersionsConfig): string[] {
     lines.push('  versions: [');
     for (let i = 0; i < versions.length; i++) {
       const comma = i < versions.length - 1 ? ',' : '';
-      lines.push(`${formatVersionDef(versions[i]!, '    ')}${comma}`);
+      const version = versions[i]!;
+      lines.push(
+        `${typeof version === 'string' ? `    ${JSON.stringify(version)}` : formatVersionDef(version, '    ')}${comma}`,
+      );
     }
     lines.push('  ],');
     return lines;
@@ -248,7 +251,7 @@ export function serializeVersions(versions: VersionsConfig): string[] {
   }
 
   if ('format' in versions) {
-    const v = versions as Exclude<VersionsConfig, VersionDefinition[] | { preset: 'stripe' }>;
+    const v = versions;
     if (v.format === 'custom') {
       lines.push('  // Custom version format — re-add your parse/format functions');
       lines.push(`  versions: ${JSON.stringify({ format: 'custom' })},`);

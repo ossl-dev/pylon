@@ -8,8 +8,9 @@ export interface PylonExpressOptions {
 
 /** Express has no response hook; restore patched methods before writing any body. */
 export function pylonExpress(pylon: Pylon, options?: PylonExpressOptions): RequestHandler {
-  pylon = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
+  const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return (req: Request, res: Response, next: NextFunction): void => {
+    const pylon = root.forRoute(req.method, req.path);
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
       if (typeof value === 'string') headers[key] = value;
@@ -37,7 +38,8 @@ export function pylonExpress(pylon: Pylon, options?: PylonExpressOptions): Reque
         if (!options?.shadow) req.body = result.body;
         if (
           options?.shadow ||
-          (result.version === pylon.current && !pylon.isUnpublished(result.version))
+          req.method === 'HEAD' ||
+          !pylon.needsResponseProcessing(result.version)
         ) {
           next();
           return;
@@ -54,6 +56,11 @@ export function pylonExpress(pylon: Pylon, options?: PylonExpressOptions): Reque
         };
         const sendTransformed = (body: unknown, send: (body: unknown) => Response) => {
           if (intercepted) return;
+          if (!pylon.needsResponseProcessing(result.version, res.statusCode)) {
+            restore();
+            send(body);
+            return;
+          }
           intercepted = true;
           pylon
             .processResponse(
@@ -62,6 +69,7 @@ export function pylonExpress(pylon: Pylon, options?: PylonExpressOptions): Reque
               {},
               result.debug?.transformsApplied ?? [],
               result.debug,
+              res.statusCode,
             )
             .then((response) => {
               restore();

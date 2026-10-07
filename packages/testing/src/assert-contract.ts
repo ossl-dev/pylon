@@ -121,7 +121,7 @@ export async function assertContract(
       );
     }
 
-    const output = await fn(sample);
+    const output = fn === 'identity' ? sample : await fn(sample);
     if (typeof output !== 'object' || output === null) {
       throw new Error(
         `assertContract: noDataLoss check failed for "${transformKey}" (request). ` +
@@ -161,8 +161,8 @@ export async function assertContract(
       );
     }
 
-    const forward = await pair.request(sample);
-    const backward = await pair.response(forward);
+    const forward = pair.request === 'identity' ? sample : await pair.request(sample);
+    const backward = pair.response === 'identity' ? forward : await pair.response(forward);
 
     try {
       assertDeepEqual(backward, sample);
@@ -193,8 +193,11 @@ export async function assertContract(
 
     for (const dir of directions) {
       const fn = pair[dir]!;
-      const input = dir === 'response' && pair.request ? await pair.request(sample) : sample;
-      const transformed = await fn(input);
+      const input =
+        dir === 'response' && typeof pair.request === 'function'
+          ? await pair.request(sample)
+          : sample;
+      const transformed = fn === 'identity' ? input : await fn(input);
       const passed = await assertions.check(transformed, sample, dir);
 
       if (!passed) {
