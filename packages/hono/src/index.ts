@@ -212,6 +212,7 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     c.res = new Response(newBodyStr, {
       status: resResult.status ?? res.status,
       statusText: resResult.status ? undefined : res.statusText,
+      headers: resResult.headers,
     });
   };
 }

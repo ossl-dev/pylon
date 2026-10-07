@@ -22,7 +22,9 @@ export function mergeConfigs(global: PylonConfig, endpoint: EndpointConfig): Pyl
       endpoint.versioning === false ? (endpoint.current ?? global.current) : global.defaultVersion,
     schemas: { ...global.schemas, ...endpoint.schemas },
     transforms: endpoint.contracts
-      ? (endpoint.transforms ?? {})
+      ? Object.fromEntries(
+          Object.entries(endpoint.transforms ?? {}).map(([key, pair]) => [key, { ...pair }]),
+        )
       : Object.fromEntries(
           Object.keys({ ...global.transforms, ...endpoint.transforms }).map((key) => [
             key,

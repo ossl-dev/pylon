@@ -70,12 +70,7 @@ function mockResponse(
   };
   return {
     status: init.status ?? 200,
-    headers: {
-      get: (name: string) => headers[name.toLowerCase()] ?? null,
-      forEach: (cb: (value: string, key: string) => void) => {
-        for (const [key, value] of Object.entries(headers)) cb(value, key);
-      },
-    },
+    headers: new Headers(headers),
     json: async () => body,
     text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
   } as unknown as Response;
@@ -247,7 +242,7 @@ describe('assertContract', () => {
     // Response direction consumes the upgraded request.
     expect(check).toHaveBeenCalledWith(
       { name: 'John', email: 'john@example.com' },
-      { name: 'John', email: 'john@example.com' },
+      { fullName: 'John', email: 'john@example.com' },
       'response',
     );
   });
@@ -304,8 +299,8 @@ describe('timeTravel', () => {
 
     expect(seen).toEqual(['v1', 'v2']);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // v1 response is upgraded to the current format; v2 response passes through
-    expect(bodies).toEqual([V2_RESPONSE, V1_RESPONSE]);
+    // Each response retains its original wire format.
+    expect(bodies).toEqual([V1_RESPONSE, V1_RESPONSE]);
   });
 
   it('filters versions when options.versions is provided', async () => {
@@ -341,29 +336,15 @@ describe('timeTravel', () => {
       'http://localhost:3000/users',
       expect.objectContaining({
         method: 'GET',
-        headers: expect.objectContaining({ 'content-type': 'application/json' }),
+        headers: expect.objectContaining({ 'x-api-version': 'v1' }),
       }),
     );
   });
 
-  it('skips versions that are not present in the pylon config', async () => {
-    const pylon = createTestPylon();
-    const seen: string[] = [];
-
-    await timeTravel(
-      pylon,
-      async (version, request) => {
-        seen.push(version);
-        await request('GET', '/users');
-      },
-      {
-        versions: ['v1', 'v99', 'v3'],
-        fetch: versionAwareFetchMock() as unknown as typeof fetch,
-      },
-    );
-
-    // v99 and v3 are not in the pylon config, only v1 is visited
-    expect(seen).toEqual(['v1']);
+  it('rejects unknown versions before running callbacks', async () => {
+    await expect(
+      timeTravel(createTestPylon(), async () => {}, { versions: ['v99'] }),
+    ).rejects.toThrow('Unknown test version');
   });
 
   it('uses options.baseUrl when building request URLs', async () => {
@@ -387,15 +368,17 @@ describe('timeTravel', () => {
     );
   });
 
-  it('downgrades request bodies and upgrades response bodies to the current version', async () => {
+  it('sends version fixtures and preserves wire responses', async () => {
     const pylon = createTestPylon();
     const fetchMock = versionAwareFetchMock();
 
     await timeTravel(
       pylon,
-      async (_version, request) => {
-        const res = await request('POST', '/users', { body: V2_REQUEST });
-        expect(res.body).toEqual(V2_RESPONSE);
+      async (version, request) => {
+        const res = await request('POST', '/users', {
+          body: version === 'v1' ? V1_REQUEST : V2_REQUEST,
+        });
+        expect(res.body).toEqual(version === 'v1' ? V1_RESPONSE : V2_RESPONSE);
       },
       { fetch: fetchMock as unknown as typeof fetch },
     );
@@ -403,7 +386,7 @@ describe('timeTravel', () => {
     const requestBodies = fetchMock.mock.calls.map((call) =>
       JSON.parse(String(call[1]?.body ?? '')),
     );
-    // v1 call: body was downgraded to the v1 shape before dispatch
+    // v1 call: explicit historical fixture.
     expect(requestBodies[0]).toEqual(V1_REQUEST);
     // v2 call: the current-version body is sent as-is
     expect(requestBodies[1]).toEqual(V2_REQUEST);
@@ -439,8 +422,10 @@ describe('snapshotVersion', () => {
 
     const snapshots = await snapshotVersion(
       pylon,
-      async (request) => {
-        const res = await request('POST', '/users', { body: V2_REQUEST });
+      async (request, version) => {
+        const res = await request('POST', '/users', {
+          body: version === 'v1' ? V1_REQUEST : V2_REQUEST,
+        });
         return res.body;
       },
       { fetch: fetchMock as unknown as typeof fetch },
@@ -448,9 +433,7 @@ describe('snapshotVersion', () => {
 
     expect(snapshots).toHaveLength(2);
     expect(snapshots.map((s) => s.version)).toEqual(['v1', 'v2']);
-    for (const snapshot of snapshots) {
-      expect(snapshot.data).toEqual(V2_RESPONSE);
-    }
+    expect(snapshots.map((snapshot) => snapshot.data)).toEqual([V1_RESPONSE, V2_RESPONSE]);
   });
 
   it('uses the fetcher return value as the snapshot data', async () => {
@@ -466,12 +449,12 @@ describe('snapshotVersion', () => {
       { fetch: fetchMock as unknown as typeof fetch },
     );
 
-    // v1 response is upgraded to the current (v2) format...
+    // Snapshots preserve the actual response for each version.
     expect(snapshots[0]).toEqual({
       version: 'v1',
-      data: { status: 200, body: V2_RESPONSE },
+      data: { status: 200, body: V1_RESPONSE },
     });
-    // ...while the current version's response is returned as-is
+    // Current response also stays unchanged.
     expect(snapshots[1]).toEqual({
       version: 'v2',
       data: { status: 200, body: V1_RESPONSE },

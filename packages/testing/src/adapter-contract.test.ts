@@ -185,6 +185,7 @@ for (const [name, adapter] of Object.entries(adapters)) {
       const client = await adapter(createPylon());
       const response = await client.send('v1', { name: 'Ada' });
       expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('application/json');
       expect(await response.json()).toEqual({ name: 'Ada', id: 1 });
       expect(response.headers.get('x-api-version')).toBe('v2');
       expect(client.calls()).toBe(1);

@@ -9,7 +9,12 @@
  */
 
 export { assertContract, type ContractAssertion } from './assert-contract.js';
-export { type SnapshotResult, snapshotVersion } from './snapshot.js';
+export { type SnapshotOptions, type SnapshotResult, snapshotVersion } from './snapshot.js';
 export { testTransform } from './test-transform.js';
-export type { TimeTravelOptions, VersionedRequest } from './time-travel.js';
+export type {
+  TimeTravelOptions,
+  VersionedRequest,
+  VersionedRequestOptions,
+  VersionedResponse,
+} from './time-travel.js';
 export { timeTravel } from './time-travel.js';

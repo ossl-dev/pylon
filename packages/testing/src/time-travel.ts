@@ -1,179 +1,107 @@
 import type { Pylon } from '@ossl/pylon-core';
 
-/**
- * Type for the request helper passed to timeTravel and snapshotVersion callbacks.
- */
-export type VersionedRequest = <T>(
+export type VersionedRequest = <T = unknown>(
   method: string,
   path: string,
   options?: VersionedRequestOptions,
 ) => Promise<VersionedResponse<T>>;
 
-/**
- * Options passed to the VersionedRequest helper.
- */
 export interface VersionedRequestOptions {
-  /** Request body (in the current/latest version format) */
-  body?: any;
-  /** Additional request headers */
+  /** Body in the selected version's wire format. */
+  body?: unknown;
   headers?: Record<string, string>;
-  /** Query parameters to append to the URL */
   query?: Record<string, string>;
 }
 
-/**
- * Response returned by the VersionedRequest helper.
- * The body is always in the current/latest version format for assertions.
- */
-export interface VersionedResponse<T = any> {
+export interface VersionedResponse<T = unknown> {
   status: number;
+  /** Actual wire response, including fields lost in historical migrations. */
   body: T;
   headers: Record<string, string>;
 }
 
-/**
- * Options for timeTravel.
- */
 export interface TimeTravelOptions {
-  /**
-   * Specific versions to test against.
-   * When omitted, all versions known to the normalizer are tested.
-   */
   versions?: string[];
-
-  /**
-   * Base URL for HTTP requests.
-   * @default 'http://localhost:3000'
-   */
   baseUrl?: string;
-
-  /**
-   * Custom fetch implementation.
-   * Useful for injecting MSW, Polly.js, or other test doubles.
-   * @default globalThis.fetch
-   */
   fetch?: typeof fetch;
 }
 
-/**
- * Run a test callback against every historical API version.
- *
- * For each version the callback receives (version, request) where `request`
- * is a helper that transparently handles request/response version
- * transformation:
- *
- *  1. The request body (supplied in the **current** version format) is
- *     **downgraded** to the target version via `pylon.transform()` with
- *     direction `'response'`.
- *  2. The downgraded body is sent to the test server using `fetch()`.
- *  3. The server response (in the target version format) is **upgraded**
- *     back to the current version via `pylon.transform()` with direction
- *     `'request'` so assertions can use a single format.
- *
- * @example
- * ```ts
- * timeTravel(pylon, async (version, request) => {
- *   const response = await request('POST', '/users', {
- *     body: { fullName: 'John Doe', email: 'john@test.com' },
- *   });
- *   expect(response.status).toBe(201);
- * });
- * ```
- *
- * The test above runs against v1, v2, v3, v4 (etc.) automatically.
- *
- * @param pylon - A configured Pylon instance
- * @param callback - Async callback invoked once per version with (version, request)
- * @param options - Optional version filter and fetch configuration
- */
+/** Run assertions against each published contract using version-specific fixtures. */
 export async function timeTravel(
   pylon: Pylon,
   callback: (version: string, request: VersionedRequest) => Promise<void>,
-  options?: TimeTravelOptions,
+  options: TimeTravelOptions = {},
 ): Promise<void> {
-  const allVersions = pylon.normalizer.listVersions().map((v) => v.name);
-  const targetVersions = options?.versions
-    ? allVersions.filter((v) => options.versions!.includes(v))
-    : allVersions;
-
-  const current = pylon.current;
-  const baseUrl = options?.baseUrl ?? 'http://localhost:3000';
-  const fetchFn = options?.fetch ?? globalThis.fetch;
-
-  for (const version of targetVersions) {
+  const versions = options.versions ?? pylon.normalizer.listVersions().map((v) => v.name);
+  const selected = new Set<string>();
+  for (const version of versions) {
+    if (!pylon.normalizer.isValid(version)) throw new Error(`Unknown test version: "${version}"`);
+    selected.add(pylon.normalizer.resolveAlias(version));
+  }
+  const fetchFn = options.fetch ?? globalThis.fetch;
+  for (const version of selected) {
     const request: VersionedRequest = async (method, path, opts) => {
-      // 1. Downgrade the request body from current-version format to
-      //    the target-version format.
-      let body: unknown = opts?.body;
-      if (body !== undefined) {
-        const result = await pylon.transform(current, version, 'response', body);
-        if (result.status !== 'error') {
-          body = result.data;
-        } else if (result.status === 'error') {
-          throw new Error(
-            `[timeTravel] Failed to downgrade body from "${current}" to "${version}": ${result.error?.message ?? 'Unknown error'}`,
-          );
-        }
-      }
-
-      // 2. Build URL with query parameters.
-      const url = new URL(path, baseUrl);
-      if (opts?.query) {
-        for (const [key, value] of Object.entries(opts.query)) {
-          url.searchParams.set(key, value);
-        }
-      }
-
-      // 3. Build fetch init.
-      const headers = new Headers(opts?.headers);
-      headers.set('content-type', 'application/json');
-      headers.set(
-        pylon.config.versioning?.sources.find((source) => source.type === 'header')?.name ??
-          'api-version',
-        version,
+      method = method.toUpperCase();
+      const url = new URL(
+        path.replaceAll('{version}', encodeURIComponent(version)),
+        options.baseUrl ?? 'http://localhost:3000',
       );
-      const fetchInit: RequestInit = {
+      for (const [key, value] of Object.entries(opts?.query ?? {}))
+        url.searchParams.set(key, value);
+      const headers = new Headers(opts?.headers);
+      let body = opts?.body;
+      const sources = pylon.config.versioning?.sources ?? [
+        { type: 'header', name: 'accept-version' },
+      ];
+      const source =
+        sources.find((s) => s.type === 'header') ??
+        sources.find((s) => s.type === 'query') ??
+        sources.find((s) => s.type === 'body');
+      if (source?.type === 'header') {
+        if (!source.name) throw new Error('Version header source requires a name');
+        headers.set(source.name, version);
+      } else if (source?.type === 'query') {
+        url.searchParams.set(source.name ?? 'api_version', version);
+      } else if (source?.type === 'body') {
+        if (
+          body === null ||
+          (body !== undefined && (typeof body !== 'object' || Array.isArray(body)))
+        )
+          throw new Error('Body versioning requires an object fixture');
+        body = { ...(body as Record<string, unknown>), [source.name ?? 'version']: version };
+      }
+      if (body !== undefined && (method === 'GET' || method === 'HEAD'))
+        throw new Error(`${method} fixtures cannot contain a body`);
+      const detected = pylon.detectVersion(
+        Object.fromEntries(headers),
+        url.pathname,
+        Object.fromEntries(url.searchParams),
+        body,
+      ).version;
+      if (detected !== version)
+        throw new Error(
+          `Test request selects "${detected}" instead of "${version}". For path versioning, use /{version}/...`,
+        );
+      if (body !== undefined && !headers.has('content-type'))
+        headers.set('content-type', 'application/json');
+      const response = await fetchFn(url.toString(), {
         method,
         headers: Object.fromEntries(headers),
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      };
-
-      // 4. Dispatch the HTTP request.
-      const response = await fetchFn(url.toString(), fetchInit);
-
-      // 5. Read response headers.
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
-
-      // 6. Read response body.
       const contentType = response.headers.get('content-type') ?? '';
-      let responseBody: unknown;
-      if (contentType.includes('application/json')) {
-        responseBody = await response.json();
-      } else {
-        responseBody = await response.text();
-      }
-
-      // 7. Upgrade the response body back to current-version format
-      //    so all assertions use the same schema.
-      if (responseBody !== undefined && responseBody !== null && typeof responseBody === 'object') {
-        const result = await pylon.transform(version, current, 'request', responseBody);
-        if (result.status === 'error')
-          throw new Error(
-            `[timeTravel] Failed to upgrade response from "${version}" to "${current}": ${result.error?.message ?? 'Unknown error'}`,
-          );
-        responseBody = result.data;
-      }
-
+      const responseBody =
+        method === 'HEAD' || [204, 205, 304].includes(response.status)
+          ? undefined
+          : /(?:application\/json|\+json)(?:\s*;|$)/i.test(contentType)
+            ? await response.json()
+            : await response.text();
       return {
         status: response.status,
-        body: responseBody as any,
-        headers: responseHeaders,
+        body: responseBody,
+        headers: Object.fromEntries(response.headers),
       };
     };
-
     await callback(version, request);
   }
 }
