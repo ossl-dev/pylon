@@ -8,6 +8,20 @@ import type {
 } from './types.js';
 import type { VersionNormalizer } from './version-normalizer.js';
 
+export interface TransformTraceStep {
+  key: string;
+  direction: TransformDirection;
+  input: unknown;
+  output: unknown;
+  status: TransformResult['status'];
+  durationMs: number;
+  error?: TransformResult['error'];
+}
+export interface TransformTrace {
+  result: TransformResult;
+  steps: TransformTraceStep[];
+}
+
 type TransformFunction = Exclude<NonNullable<TransformPair['request']>, 'identity'>;
 interface TransformStep {
   key: string;
@@ -175,6 +189,7 @@ export class TransformEngine {
     direction: TransformDirection,
     input: unknown,
     onError?: (err: TransformError) => void,
+    onStep?: (step: TransformTraceStep) => void,
   ): Promise<TransformResult> {
     if (
       this.normalizer.resolveAlias(source) === this.normalizer.resolveAlias(target) &&
@@ -188,6 +203,23 @@ export class TransformEngine {
 
     for (const { key, pair, fn, schema } of steps) {
       const stepInput = data;
+      const snapshot = onStep ? structuredClone(data) : undefined;
+      const started = onStep ? performance.now() : 0;
+      const report = onStep
+        ? (stepStatus: TransformResult['status'], error?: TransformResult['error']) =>
+            onStep({
+              key,
+              direction,
+              input: snapshot,
+              output: structuredClone(data),
+              status: stepStatus,
+              durationMs: performance.now() - started,
+              ...(error
+                ? { error: { code: error.code, message: error.message, details: error.details } }
+                : {}),
+            })
+        : undefined;
+      let stepStatus: 'success' | 'fallback' = 'success';
       try {
         const output = fn(data);
         data = output != null && typeof output.then === 'function' ? await output : output;
@@ -202,17 +234,32 @@ export class TransformEngine {
             : schema && cause instanceof z.ZodError
               ? `${direction.toUpperCase()}_CONTRACT_FAILED`
               : 'EXECUTION_ERROR',
-          { key, source, target, direction, originalError: message },
+          {
+            key,
+            source,
+            target,
+            direction,
+            originalError: message,
+            ...(cause instanceof z.ZodError ? { issues: cause.issues } : {}),
+          },
           { cause },
         );
         onError?.(error);
         switch (strategy?.strategy) {
           case 'log-and-continue':
-            break;
+            report?.('error', error);
+            if (!onError) console.error(error.message);
+            continue;
           case 'passthrough':
+            report?.('passthrough', error);
             return { status: 'passthrough', data };
           case 'fallback':
             if (!strategy.fallback) {
+              report?.('error', {
+                code: 'FALLBACK_NOT_CONFIGURED',
+                message: error.message,
+                details: error.details,
+              });
               return {
                 status: 'error',
                 error: {
@@ -226,24 +273,29 @@ export class TransformEngine {
               data = await strategy.fallback(stepInput);
               if (schema) data = await schema.parseAsync(data);
               status = 'fallback';
+              stepStatus = 'fallback';
             } catch (fallbackError) {
-              return {
-                status: 'error',
-                error: {
-                  code: 'FALLBACK_FAILED',
-                  message: `Fallback for ${key} failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
-                  details: error.details,
+              const failed = {
+                code: 'FALLBACK_FAILED',
+                message: `Fallback for ${key} failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+                details: {
+                  ...error.details,
+                  ...(fallbackError instanceof z.ZodError ? { issues: fallbackError.issues } : {}),
                 },
               };
+              report?.('error', failed);
+              return { status: 'error', error: failed };
             }
             break;
           default:
+            report?.('error', error);
             return {
               status: 'error',
               error: { code: error.code, message: error.message, details: error.details },
             };
         }
       }
+      report?.(stepStatus);
     }
     return { status, data };
   }

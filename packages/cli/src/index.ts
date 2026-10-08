@@ -13,6 +13,7 @@ import { schemaShowAction, schemaValidateAction } from './actions/schema.js';
 import {
   transformComposeAction,
   transformGraphAction,
+  transformRunAction,
   transformShowAction,
 } from './actions/transform.js';
 import {
@@ -116,24 +117,30 @@ schemaOptions(
   .action(schemaValidateAction);
 
 const transformCmd = program.command('transform').description('Manage transforms');
-transformCmd
-  .command('show <key>')
-  .description('Show composed transform')
-  .action(async (key: string) => {
-    await transformShowAction(key);
-  });
-transformCmd
-  .command('graph')
-  .description('Show version graph')
-  .action(async () => {
-    await transformGraphAction();
-  });
-transformCmd
-  .command('compose <source> <target>')
-  .description('Compose transform chain')
-  .action(async (source: string, target: string) => {
-    await transformComposeAction(source, target);
-  });
+function transformOptions(command: Command): Command {
+  return command
+    .option('--endpoint <name>', 'Select endpoint contract')
+    .option('--json', 'Print machine-readable results');
+}
+transformOptions(transformCmd.command('show <key>').description('Inspect a migration chain'))
+  .option('--direction <direction>', 'request or response', 'request')
+  .action(transformShowAction);
+transformOptions(
+  transformCmd.command('graph').description('Show registered migration paths'),
+).action(transformGraphAction);
+transformOptions(
+  transformCmd.command('compose <source> <target>').description('Inspect a composed chain'),
+)
+  .option('--direction <direction>', 'request or response', 'request')
+  .action(transformComposeAction);
+transformOptions(
+  transformCmd
+    .command('run <source> <target>')
+    .description('Dry-run a fixture with hop snapshots; executes user migrations locally'),
+)
+  .requiredOption('--input <file>', 'JSON fixture')
+  .option('--direction <direction>', 'request or response', 'request')
+  .action(transformRunAction);
 
 program
   .command('audit')

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `pylon.trace` and `transform run` dry-runs with detached per-hop snapshots, timings, fallback outcomes, and structured schema issue paths.
+- Fix CLI transform inspection for endpoint contracts and explicit identities; log continued migration errors when no error callback is installed.
+
 - Bound Hono/Next JSON buffering and migrated responses; reject oversized requests with 413 and oversized server responses with 500. Next request parsing no longer clones streams.
 - Fix request migrations returning `undefined` so handlers do not receive stale historical bodies.
 

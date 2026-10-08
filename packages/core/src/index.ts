@@ -19,6 +19,7 @@ export {
   resolveBodyLimits,
 } from './http.js';
 export { Pylon } from './pylon.js';
+export type { TransformTrace, TransformTraceStep } from './transform-engine.js';
 export { TransformEngine, TransformError } from './transform-engine.js';
 export type * from './types.js';
 export { VersionDetectionError, VersionDetector } from './version-detector.js';

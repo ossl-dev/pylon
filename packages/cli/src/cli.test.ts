@@ -91,6 +91,51 @@ describe('CLI on Node', () => {
         mode: 'pipeline',
         iterations: 10,
       });
+      const trace = run(
+        'transform',
+        'run',
+        'v1',
+        'v2',
+        '--endpoint',
+        'createUser',
+        '--input',
+        'request.json',
+        '--json',
+      );
+      expect(trace.status, trace.stderr).toBe(0);
+      expect(JSON.parse(trace.stdout)).toMatchObject({
+        result: { status: 'success', data: { fullName: 'Ada' } },
+        steps: [
+          { key: 'v1->v2', input: { name: 'Ada' }, output: { fullName: 'Ada' }, status: 'success' },
+        ],
+      });
+      const responseTrace = run(
+        'transform',
+        'run',
+        'v2',
+        'v1',
+        '--endpoint',
+        'createUser',
+        '--direction',
+        'response',
+        '--input',
+        'response.json',
+        '--json',
+      );
+      expect(responseTrace.status, responseTrace.stderr).toBe(0);
+      expect(JSON.parse(responseTrace.stdout).result.data).toEqual({ id: 1, name: 'Ada' });
+      const graph = run('transform', 'graph', '--json');
+      expect(graph.status, graph.stderr).toBe(0);
+      expect(JSON.parse(graph.stdout).createUser.steps[0]).toMatchObject({
+        request: 'custom',
+        response: 'custom',
+      });
+      const inspect = run('transform', 'show', 'v1->v2', '--endpoint', 'createUser', '--json');
+      expect(inspect.status, inspect.stderr).toBe(0);
+      expect(JSON.parse(inspect.stdout).steps).toHaveLength(1);
+      const badTrace = run('transform', 'run', 'v1', 'v2', '--input', 'request.json', '--json');
+      expect(badTrace.status).toBe(1);
+      expect(JSON.parse(badTrace.stdout).result.error.message).toContain('--endpoint');
       const show = run('schema', 'show', 'v1', '--endpoint', 'createUser');
       expect(show.status, show.stderr).toBe(0);
       expect(JSON.parse(show.stdout).properties.name.type).toBe('string');

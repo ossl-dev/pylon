@@ -202,6 +202,9 @@ pylon generate openapi --version v1 -o openapi-v1.json
 pylon generate openapi --all-versions -o specs
 pylon bench v1 v2 --endpoint createUser --mode pipeline \
   --input request.json --response response.json -n 1000 --json
+pylon transform graph --json
+pylon transform run v1 v2 --endpoint createUser --input request.json --json
+pylon transform run v2 v1 --endpoint createUser --direction response --input response.json
 pylon version deprecate v1
 pylon version unpublish v1
 pylon version publish v1
@@ -213,6 +216,8 @@ OpenAPI uses declared methods, paths, statuses, and separate request/response sc
 Unpublish rejects requests after config reload. Retirement retains contracts and migration hops so newer clients still work. Retired releases cannot be republished. Contract rollbacks use `reject`; clients explicitly select a published release. Version edits validate before writing and preserve runtime schemas and functions.
 
 Schema diffs report fields and JSON schema constraints. Renames require intent; matching shapes cannot prove a rename. Scaffolding, generated changelogs, and the playground remain unfinished.
+
+`pylon transform run` executes migrations locally once and reports detached input/output snapshots, timings, and fallback/error status for each hop. It validates source and intermediate contracts through the runtime pipeline. User migration functions still run normally, including any side effects they perform. `pylon.trace(source, target, direction, fixture)` exposes the same report; snapshots require structured-cloneable values. Ordinary transforms allocate no snapshots. Schema failures include structured issue paths in error details.
 
 ## Performance
 

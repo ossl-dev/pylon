@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { validateConfig } from './config.js';
 import { routePattern } from './contracts.js';
 import { mergeConfigs } from './endpoint.js';
+import type { TransformTrace, TransformTraceStep } from './transform-engine.js';
 import { TransformEngine, TransformError } from './transform-engine.js';
 import type {
   DebugInfo,
@@ -263,6 +264,7 @@ export class Pylon {
       }
     }
 
+    const onTransformError = this.config.onTransformError;
     // 2. Transform request to current version
     let transformsApplied: string[] = [];
     let transformResult: TransformResult = { status: 'success', data: body };
@@ -275,14 +277,16 @@ export class Pylon {
           this.current,
           'request',
           body,
-          (err) =>
-            this.config.onTransformError?.({
-              source: clientVersion,
-              target: this.current,
-              direction: 'request',
-              originalError: err instanceof Error ? err : new Error(String(err)),
-              endpoint: options?.endpoint ?? this.endpointName,
-            }),
+          onTransformError
+            ? (err) =>
+                onTransformError({
+                  source: clientVersion,
+                  target: this.current,
+                  direction: 'request',
+                  originalError: err instanceof Error ? err : new Error(String(err)),
+                  endpoint: options?.endpoint ?? this.endpointName,
+                })
+            : undefined,
         );
 
         if (transformResult.status !== 'error') transformedBody = transformResult.data;
@@ -452,6 +456,7 @@ export class Pylon {
     }
 
     let transformedBody = responseBody;
+    const onTransformError = this.config.onTransformError;
 
     try {
       if (this.config.contracts)
@@ -463,13 +468,16 @@ export class Pylon {
         targetVersion,
         'response',
         transformedBody,
-        (err) =>
-          this.config.onTransformError?.({
-            source: this.current,
-            target: clientVersion,
-            direction: 'response',
-            originalError: err instanceof Error ? err : new Error(String(err)),
-          }),
+        onTransformError
+          ? (err) =>
+              onTransformError({
+                source: this.current,
+                target: clientVersion,
+                direction: 'response',
+                originalError: err instanceof Error ? err : new Error(String(err)),
+                endpoint: this.endpointName,
+              })
+          : undefined,
       );
 
       if (result.status === 'error') {
@@ -585,11 +593,35 @@ export class Pylon {
    * @param data - The data to transform
    * @returns The transform result
    */
-  async transform(
+  transform(
     source: string,
     target: string,
     direction: 'request' | 'response',
     data: unknown,
+  ): Promise<TransformResult> {
+    return this.transformWithSteps(source, target, direction, data);
+  }
+
+  /** Execute migrations once and capture detached, structured-cloneable hop snapshots. */
+  async trace(
+    source: string,
+    target: string,
+    direction: 'request' | 'response',
+    data: unknown,
+  ): Promise<TransformTrace> {
+    const steps: TransformTraceStep[] = [];
+    const result = await this.transformWithSteps(source, target, direction, data, (step) =>
+      steps.push(step),
+    );
+    return { result, steps };
+  }
+
+  private async transformWithSteps(
+    source: string,
+    target: string,
+    direction: 'request' | 'response',
+    data: unknown,
+    onStep?: (step: TransformTraceStep) => void,
   ): Promise<TransformResult> {
     if (this.config.contracts) {
       const contract = this.config.contracts[this.normalizer.resolveAlias(source)];
@@ -607,7 +639,7 @@ export class Pylon {
         };
       data = parsed.data;
     }
-    return this.engine.execute(source, target, direction, data);
+    return this.engine.execute(source, target, direction, data, undefined, onStep);
   }
 
   /**

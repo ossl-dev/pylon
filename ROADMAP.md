@@ -109,7 +109,7 @@ Make the engine faster, safer, more flexible.
 - [x] Validate contract coverage at config time and intermediate shapes at runtime
 - [ ] Add `beforeAll` / `afterAll` hooks — run a transform before/after every version hop (useful for logging, metrics, auth header migration)
 - [ ] Support conditional transforms — "if the request has field X, apply this transform; otherwise skip"
-- [ ] Add transform dry-run mode — pass a sample payload through a chain and see each step's output
+- [x] Add transform dry-run mode — execute fixtures once, capture detached per-hop inputs/outputs and outcomes
 - [x] Benchmark and optimize chain compilation — cache compiled functions and execution steps per engine; keep endpoint caches isolated
 
 ### Version normalizer
@@ -128,8 +128,8 @@ Make the engine faster, safer, more flexible.
 
 ### Error handling
 
-- [ ] Better transform error messages — include the version hop, field name, and input value that caused the failure
-- [ ] Add a debug mode that logs every transform step with before/after payloads
+- [x] Include version hop, direction, and structured schema issue paths in migration failures
+- [x] Add explicit per-hop tracing with before/after snapshots through `pylon.trace` and CLI dry-runs
 - [x] Distinguish client errors (400/422) from server transform errors (500) across all adapters
 
 ---
@@ -259,7 +259,7 @@ Not triaged into phases. Fix anytime.
 - [x] **Biome configuration** — v2 schema and shared settings wired into package lint commands.
 - [x] **Package engines** — minimum Node versions declared; the CLI requires 22.12+.
 - [x] **Next.js scope** — documented as an App Router adapter. Pages Router support remains unimplemented.
-- [ ] **Transform engine error strategy `log-and-continue`** — add a default logger when no `onTransformError` callback is supplied.
+- [x] **Transform error logging** — continued failures log by default when no explicit error callback is supplied.
 - [x] **Version detector path parsing** — match complete segments, handle nested paths and trailing slashes, and support global custom patterns.
 - [x] **JSON body budgets** — Hono/Next enforce configurable 1 MiB defaults while reading streams. Host parsers enforce Express/Koa/Fastify request limits.
 - [ ] **Shadow mode logs full request/response bodies** — potential data leak in production if turned on accidentally. Add body redaction or truncation.
