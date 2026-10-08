@@ -20,7 +20,7 @@ Make one current implementation reliable for every published client release. Run
 - [x] Inspect and diff real JSON schemas, including nested constraints
 - [x] Measure core and adapter pipelines across payload sizes and sync/async hops
 - [ ] Scaffold migrations from explicit rename/default decisions, then generate wire fixture tests
-- [ ] Enforce payload size budgets in buffering adapters
+- [x] Enforce UTF-8 JSON budgets in Hono/Next buffering adapters; document host parser limits
 - [ ] Add HTTP load benchmarks with concurrency, memory use, and network latency
 - [ ] Add adoption examples for existing production routes
 
@@ -261,7 +261,7 @@ Not triaged into phases. Fix anytime.
 - [x] **Next.js scope** — documented as an App Router adapter. Pages Router support remains unimplemented.
 - [ ] **Transform engine error strategy `log-and-continue`** — add a default logger when no `onTransformError` callback is supplied.
 - [x] **Version detector path parsing** — match complete segments, handle nested paths and trailing slashes, and support global custom patterns.
-- [ ] **No request body size limit handling** — if a request body is very large, the transform engine will buffer it entirely in memory. Add streaming or size limits.
+- [x] **JSON body budgets** — Hono/Next enforce configurable 1 MiB defaults while reading streams. Host parsers enforce Express/Koa/Fastify request limits.
 - [ ] **Shadow mode logs full request/response bodies** — potential data leak in production if turned on accidentally. Add body redaction or truncation.
 
 ---

@@ -141,6 +141,17 @@ The Express adapter monkey patches `res.json`/`res.send`/`res.end`. It works but
 
 ---
 
+Hono and Next buffer at most 1 MiB of JSON per request/response by default. Override in adapter options:
+
+```typescript
+app.use('*', pylonHono(pylon, {
+  bodyLimits: { request: 256 * 1024, response: 2 * 1024 * 1024 },
+}));
+// Next: pylonNext(pylon, { bodyLimits: { request: 256 * 1024 } })(handler)
+```
+
+Budgets count actual UTF-8 bytes, including chunked bodies. Oversized requests return 413 before migrations or handlers; oversized JSON responses return 500 before emitting their payload. Response budgets apply before and after migration. Error responses and non-JSON streams pass through. Register Hono middleware before body readers to enforce limits before buffering; Express/Koa/Fastify request parsers need their own limits. Budgets cannot constrain allocations inside user migrations.
+
 ## Webhook Versioning
 
 Webhook payloads use response migrations. Scope the instance to the operation whose response contract matches the event payload:

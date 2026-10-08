@@ -1,10 +1,18 @@
-import type { DebugInfo, Pylon } from '@ossl/pylon-core';
-import { isJSONContentType, mergeResponseHeaders } from '@ossl/pylon-core';
+import type { DebugInfo, JSONBodyLimits, Pylon } from '@ossl/pylon-core';
+import {
+  BodyLimitError,
+  checkJSONBodySize,
+  isJSONContentType,
+  mergeResponseHeaders,
+  readJSONBody,
+  resolveBodyLimits,
+} from '@ossl/pylon-core';
 import type { MiddlewareHandler } from 'hono';
 
 export interface PylonHonoOptions {
   /** Override endpoint name for per-endpoint config */
   endpoint?: string;
+  bodyLimits?: JSONBodyLimits;
 }
 
 /**
@@ -36,34 +44,6 @@ function collectQuery(c: { req: { queries(): Record<string, string[]> } }): Reco
 }
 
 /**
- * Read and parse the request body.
- *
- * Handles JSON and text content types.  Returns `undefined` for methods
- * that carry no body (GET/HEAD) or when the body is empty / unparseable.
- */
-async function readBody(c: {
-  req: {
-    raw: { method: string };
-    header(name: string): string | undefined;
-    json<T = unknown>(): Promise<T>;
-    text(): Promise<string>;
-  };
-}): Promise<unknown> {
-  const method = c.req.raw.method;
-  if (method === 'GET' || method === 'HEAD') {
-    return undefined;
-  }
-
-  const contentType = c.req.header('content-type') ?? '';
-  if (!contentType) {
-    return undefined;
-  }
-
-  // JSON content-type
-  return isJSONContentType(contentType) ? c.req.json() : undefined;
-}
-
-/**
  * Hono middleware that intercepts requests and applies Pylon version transforms.
  *
  * Usage:
@@ -90,6 +70,7 @@ async function readBody(c: {
  * @param options - Optional endpoint override
  */
 export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareHandler {
+  const limits = resolveBodyLimits(options?.bodyLimits);
   const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   return async (c, next) => {
     const pylon = root.forRoute(c.req.method, c.req.path);
@@ -102,11 +83,32 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     const query = collectQuery(c);
     let body: unknown;
     try {
-      body = await readBody(c);
-    } catch {
+      if (
+        !['GET', 'HEAD'].includes(c.req.method) &&
+        isJSONContentType(c.req.header('content-type') ?? '')
+      ) {
+        let parsed: { text: string; value: unknown };
+        if (c.req.raw.bodyUsed) {
+          const text = checkJSONBodySize(await c.req.text(), limits.request);
+          parsed = { text, value: JSON.parse(text) };
+        } else parsed = await readJSONBody(c.req.raw, limits.request);
+        body = parsed.value;
+        // Hono stores body promises despite declaring cached text as string.
+        c.req.bodyCache = {
+          json: Promise.resolve(body),
+          text: Promise.resolve(parsed.text),
+        } as unknown as typeof c.req.bodyCache;
+      }
+    } catch (error) {
       return c.json(
-        { error: { code: 'INVALID_JSON', message: 'Malformed JSON request body' } },
-        400,
+        {
+          error: {
+            code: error instanceof BodyLimitError ? 'REQUEST_BODY_TOO_LARGE' : 'INVALID_JSON',
+            message:
+              error instanceof BodyLimitError ? error.message : 'Malformed JSON request body',
+          },
+        },
+        error instanceof BodyLimitError ? 413 : 400,
       );
     }
 
@@ -135,10 +137,8 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
 
     // 6. Replace body cache so downstream `c.req.json()` / `c.req.text()`
     //    receives the *transformed* body rather than the original.
-    if (reqResult.body !== undefined && reqResult.body !== body) {
-      // Hono stores Promises in bodyCache even though the TS types say `string`.
-      // biome-ignore lint/suspicious/noExplicitAny: bodyCache stores Promises at runtime
-      (c.req as any).bodyCache = {
+    if (reqResult.body !== body) {
+      c.req.bodyCache = {
         json: Promise.resolve(reqResult.body),
       };
     }
@@ -168,15 +168,34 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     const resContentType = c.res.headers.get('content-type') ?? '';
     if (!c.res.body || !isJSONContentType(resContentType)) return;
     // Hono may rebuild its Response when changing headers. Read the resulting instance.
-    if (c.res.headers.has('content-length')) c.header('content-length', undefined);
+    // Retain the length for an early limit check before Hono rebuilds the Response.
+    const declaredLength = c.res.headers.get('content-length');
+    if (declaredLength) c.header('content-length', undefined);
     const res = c.res;
     let resBody: unknown;
 
     try {
-      resBody = await res.json();
-    } catch {
+      if (
+        declaredLength &&
+        /^\d+$/.test(declaredLength) &&
+        Number(declaredLength) > limits.response
+      ) {
+        void res.body?.cancel().catch(() => {});
+        throw new BodyLimitError(limits.response);
+      }
+      resBody = (await readJSONBody(res, limits.response)).value;
+    } catch (error) {
       c.res = Response.json(
-        { error: { code: 'RESPONSE_TRANSFORM_FAILED', message: 'Malformed JSON response body' } },
+        {
+          error: {
+            code:
+              error instanceof BodyLimitError
+                ? 'RESPONSE_BODY_TOO_LARGE'
+                : 'RESPONSE_TRANSFORM_FAILED',
+            message:
+              error instanceof BodyLimitError ? error.message : 'Malformed JSON response body',
+          },
+        },
         { status: 500, headers: reqResult.headers },
       );
       return;
@@ -202,7 +221,28 @@ export function pylonHono(pylon: Pylon, options?: PylonHonoOptions): MiddlewareH
     delete resResult.headers['content-length'];
 
     // 8. Build the final transformed response
-    const newBodyStr = resResult.body !== undefined ? JSON.stringify(resResult.body) : null;
+    let newBodyStr: string | null;
+    try {
+      newBodyStr =
+        resResult.body === undefined
+          ? null
+          : checkJSONBodySize(JSON.stringify(resResult.body), limits.response);
+    } catch (error) {
+      c.res = Response.json(
+        {
+          error: {
+            code:
+              error instanceof BodyLimitError
+                ? 'RESPONSE_BODY_TOO_LARGE'
+                : 'RESPONSE_TRANSFORM_FAILED',
+            message:
+              error instanceof BodyLimitError ? error.message : 'Response serialization failed',
+          },
+        },
+        { status: 500, headers: reqResult.headers },
+      );
+      return;
+    }
 
     const transformedHeaders = mergeResponseHeaders(res.headers, resResult.headers);
     transformedHeaders.delete('content-length');

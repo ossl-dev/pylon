@@ -9,7 +9,15 @@ export type {
 } from './contracts.js';
 export { defineEndpoint } from './contracts.js';
 export { createEndpoint, matchEndpoint, mergeConfigs } from './endpoint.js';
-export { isJSONContentType, mergeResponseHeaders } from './http.js';
+export type { JSONBodyLimits } from './http.js';
+export {
+  BodyLimitError,
+  checkJSONBodySize,
+  isJSONContentType,
+  mergeResponseHeaders,
+  readJSONBody,
+  resolveBodyLimits,
+} from './http.js';
 export { Pylon } from './pylon.js';
 export { TransformEngine, TransformError } from './transform-engine.js';
 export type * from './types.js';

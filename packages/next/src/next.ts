@@ -1,10 +1,18 @@
-import type { Pylon } from '@ossl/pylon-core';
-import { isJSONContentType, mergeResponseHeaders } from '@ossl/pylon-core';
+import type { JSONBodyLimits, Pylon } from '@ossl/pylon-core';
+import {
+  BodyLimitError,
+  checkJSONBodySize,
+  isJSONContentType,
+  mergeResponseHeaders,
+  readJSONBody,
+  resolveBodyLimits,
+} from '@ossl/pylon-core';
 import type { NextRequest } from 'next/server';
 
 export interface PylonNextOptions {
   /** Optional endpoint name for scoped versioning via pylon.forEndpoint(). */
   endpoint?: string;
+  bodyLimits?: JSONBodyLimits;
 }
 
 /**
@@ -36,6 +44,7 @@ export interface PylonNextOptions {
  * ```
  */
 export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
+  const limits = resolveBodyLimits(options?.bodyLimits);
   const root = options?.endpoint ? pylon.forEndpoint(options.endpoint) : pylon;
   // biome-ignore lint/suspicious/noExplicitAny: decorator wrapping unknown handler signatures
   return function wrap<T extends (...args: any[]) => any>(handler: T): T {
@@ -64,13 +73,22 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
       // Parse JSON body if present; otherwise leave undefined so Pylon
       // does not attempt to transform a non-JSON payload.
       let body: unknown;
+      let originalText: string | undefined;
       if (request.body && isJSONContentType(request.headers.get('content-type') ?? '')) {
         try {
-          body = await request.clone().json();
-        } catch {
+          const parsed = await readJSONBody(request, limits.request);
+          body = parsed.value;
+          originalText = parsed.text;
+        } catch (error) {
           return Response.json(
-            { error: { code: 'INVALID_JSON', message: 'Malformed JSON request body' } },
-            { status: 400 },
+            {
+              error: {
+                code: error instanceof BodyLimitError ? 'REQUEST_BODY_TOO_LARGE' : 'INVALID_JSON',
+                message:
+                  error instanceof BodyLimitError ? error.message : 'Malformed JSON request body',
+              },
+            },
+            { status: error instanceof BodyLimitError ? 413 : 400 },
           );
         }
       }
@@ -95,7 +113,12 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
 
       // --- Create transformed request for downstream handler ---
       const transformedRequest =
-        result.body === body ? request : createTransformedRequest(request, result.body);
+        originalText === undefined && result.body === body
+          ? request
+          : createTransformedRequest(
+              request,
+              result.body === body ? originalText : JSON.stringify(result.body),
+            );
 
       // --- Invoke the original route handler ---
       const response = await handler(transformedRequest, ...args.slice(1));
@@ -121,16 +144,22 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
         if (response.body && isJSONContentType(contentType)) {
           let responseBody: unknown;
           try {
-            responseBody = await response.json();
-          } catch {
+            responseBody = (await readJSONBody(response, limits.response)).value;
+          } catch (error) {
             const errorHeaders = mergeResponseHeaders(response.headers, result.headers);
             errorHeaders.delete('content-length');
             errorHeaders.set('content-type', 'application/json');
             return Response.json(
               {
                 error: {
-                  code: 'RESPONSE_TRANSFORM_FAILED',
-                  message: 'Malformed JSON response body',
+                  code:
+                    error instanceof BodyLimitError
+                      ? 'RESPONSE_BODY_TOO_LARGE'
+                      : 'RESPONSE_TRANSFORM_FAILED',
+                  message:
+                    error instanceof BodyLimitError
+                      ? error.message
+                      : 'Malformed JSON response body',
                 },
               },
               { status: 500, headers: errorHeaders },
@@ -146,7 +175,31 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
           );
           const transformedHeaders = mergeResponseHeaders(response.headers, responseResult.headers);
           transformedHeaders.delete('content-length');
-          return new Response(JSON.stringify(responseResult.body), {
+          let serialized: string | undefined;
+          try {
+            serialized =
+              responseResult.body === undefined
+                ? undefined
+                : checkJSONBodySize(JSON.stringify(responseResult.body), limits.response);
+          } catch (error) {
+            transformedHeaders.set('content-type', 'application/json');
+            return Response.json(
+              {
+                error: {
+                  code:
+                    error instanceof BodyLimitError
+                      ? 'RESPONSE_BODY_TOO_LARGE'
+                      : 'RESPONSE_TRANSFORM_FAILED',
+                  message:
+                    error instanceof BodyLimitError
+                      ? error.message
+                      : 'Response serialization failed',
+                },
+              },
+              { status: 500, headers: transformedHeaders },
+            );
+          }
+          return new Response(serialized, {
             status: responseResult.status ?? response.status,
             statusText: responseResult.status ? undefined : response.statusText,
             headers: transformedHeaders,
@@ -179,13 +232,10 @@ export function pylonNext(pylon: Pylon, options?: PylonNextOptions) {
  * no parsed body existed (non-JSON), the original body stream is passed
  * through as-is.
  */
-function createTransformedRequest(original: NextRequest, transformedBody: unknown): NextRequest {
-  if (['GET', 'HEAD'].includes(original.method) || transformedBody === undefined) return original;
+function createTransformedRequest(original: NextRequest, text: string | undefined): NextRequest {
+  if (['GET', 'HEAD'].includes(original.method)) return original;
   const headers = new Headers(original.headers);
   headers.delete('content-length');
   const RequestType = original.constructor as typeof Request;
-  return new RequestType(original, {
-    headers,
-    body: JSON.stringify(transformedBody),
-  }) as NextRequest;
+  return new RequestType(original, { headers, body: text ?? '' }) as NextRequest;
 }

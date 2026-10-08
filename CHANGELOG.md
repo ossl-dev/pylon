@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Bound Hono/Next JSON buffering and migrated responses; reject oversized requests with 413 and oversized server responses with 500. Next request parsing no longer clones streams.
+- Fix request migrations returning `undefined` so handlers do not receive stale historical bodies.
+
 - Fix build and lint configuration, source-only tests, and supported Node engines.
 - Enforce version rejection and transform failures across all five adapters; add a shared contract suite.
 - Cache transform execution steps per engine; isolate endpoint overrides and retain rollback state.
@@ -17,6 +20,8 @@
 - Add a core/Hono/Next benchmark matrix; avoid cloning response streams when replacing their bodies.
 
 ### Compatibility changes
+
+- Hono/Next JSON request and processed-response budgets default to 1 MiB. Configure adapter `bodyLimits` to permit larger payloads.
 
 - `timeTravel` and `snapshotVersion` send historical wire fixtures and return actual wire responses. They no longer infer inverse request/response migrations.
 - Contract migrations require both directions, using `'identity'` when unchanged. Contract rollbacks reject unpublished releases; clients select alternatives explicitly.
