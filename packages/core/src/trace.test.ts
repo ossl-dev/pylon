@@ -110,6 +110,7 @@ describe('migration traces', () => {
       output: { fullName: 'fallback', active: true },
     });
     expect(trace.result.status).toBe('fallback');
+    expect(trace.steps[0]?.error?.message).toContain('broken');
     expect(fallback).toHaveBeenCalledOnce();
     const bad = await strict({
       'v1->v2': {

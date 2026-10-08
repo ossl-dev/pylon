@@ -206,19 +206,22 @@ export class TransformEngine {
       const snapshot = onStep ? structuredClone(data) : undefined;
       const started = onStep ? performance.now() : 0;
       const report = onStep
-        ? (stepStatus: TransformResult['status'], error?: TransformResult['error']) =>
+        ? (stepStatus: TransformResult['status'], error?: TransformResult['error']) => {
+            const durationMs = performance.now() - started;
             onStep({
               key,
               direction,
               input: snapshot,
               output: structuredClone(data),
               status: stepStatus,
-              durationMs: performance.now() - started,
+              durationMs,
               ...(error
                 ? { error: { code: error.code, message: error.message, details: error.details } }
                 : {}),
-            })
+            });
+          }
         : undefined;
+      let stepError: TransformResult['error'];
       let stepStatus: 'success' | 'fallback' = 'success';
       try {
         const output = fn(data);
@@ -244,6 +247,7 @@ export class TransformEngine {
           },
           { cause },
         );
+        stepError = error;
         onError?.(error);
         switch (strategy?.strategy) {
           case 'log-and-continue':
@@ -295,7 +299,7 @@ export class TransformEngine {
             };
         }
       }
-      report?.(stepStatus);
+      report?.(stepStatus, stepError);
     }
     return { status, data };
   }
