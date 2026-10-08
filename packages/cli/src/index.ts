@@ -165,10 +165,10 @@ generateCmd
   });
 generateCmd
   .command('changelog <range>')
-  .description('Generate changelog')
-  .action(async (range: string) => {
-    await generateChangelogAction(range);
-  });
+  .description('Generate declared contract changes')
+  .option('-o, --output <path>', 'Write changelog to a file')
+  .option('--json', 'Print machine-readable contract changes')
+  .action(generateChangelogAction);
 
 program
   .command('scaffold')

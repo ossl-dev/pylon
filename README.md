@@ -150,7 +150,7 @@ app.use('*', pylonHono(pylon, {
 // Next: pylonNext(pylon, { bodyLimits: { request: 256 * 1024 } })(handler)
 ```
 
-Budgets count actual UTF-8 bytes, including chunked bodies. Oversized requests return 413 before migrations or handlers; oversized JSON responses return 500 before emitting their payload. Response budgets apply before and after migration. Error responses and non-JSON streams pass through. Register Hono middleware before body readers to enforce limits before buffering; Express/Koa/Fastify request parsers need their own limits. Budgets cannot constrain allocations inside user migrations.
+Budgets count actual UTF-8 bytes, including chunked bodies. Oversized requests return 413 before migrations or handlers; oversized JSON responses return 500 before emitting their payload. Response budgets apply before and after migration. Error responses and non-JSON streams bypass response budgeting. Non-JSON request bodies bypass parsing; required JSON request schemas still validate missing input. Register Hono middleware before body readers to enforce limits before buffering; Express/Koa/Fastify request parsers need their own limits. Budgets cannot constrain allocations inside user migrations.
 
 ## Webhook Versioning
 
@@ -202,6 +202,8 @@ pylon generate openapi --version v1 -o openapi-v1.json
 pylon generate openapi --all-versions -o specs
 pylon bench v1 v2 --endpoint createUser --mode pipeline \
   --input request.json --response response.json -n 1000 --json
+pylon generate changelog v1..v2 -o changes/v2.md
+pylon generate changelog v1..v2 --json
 pylon transform graph --json
 pylon transform run v1 v2 --endpoint createUser --input request.json --json
 pylon transform run v2 v1 --endpoint createUser --direction response --input response.json
@@ -215,7 +217,7 @@ OpenAPI uses declared methods, paths, statuses, and separate request/response sc
 
 Unpublish rejects requests after config reload. Retirement retains contracts and migration hops so newer clients still work. Retired releases cannot be republished. Contract rollbacks use `reject`; clients explicitly select a published release. Version edits validate before writing and preserve runtime schemas and functions.
 
-Schema diffs report fields and JSON schema constraints. Renames require intent; matching shapes cannot prove a rename. Scaffolding, generated changelogs, and the playground remain unfinished.
+Schema diffs report fields and JSON schema constraints. Renames require intent; matching shapes cannot prove a rename. Generated changelogs compare each operation’s declared request/response schemas and list registered hops in the selected range. They do not execute migrations or infer business behavior. Scaffolding and the playground remain unfinished.
 
 `pylon transform run` executes migrations locally once and reports detached input/output snapshots, timings, and fallback/error status for each hop. It validates source and intermediate contracts through the runtime pipeline. User migration functions still run normally, including any side effects they perform. `pylon.trace(source, target, direction, fixture)` exposes the same report; snapshots require structured-cloneable values. Ordinary transforms allocate no snapshots. Schema failures include structured issue paths in error details.
 

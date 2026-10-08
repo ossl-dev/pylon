@@ -47,7 +47,7 @@ Core, transforms, adapters, CLI, OpenAPI, testing, and webhooks have unit covera
 
 ### CLI
 
-Onboarding, diagnosis, schema inspection, spec generation, and fixture benchmarks work. Scaffolding and generated changelogs remain unfinished.
+Onboarding, diagnosis, schema inspection, spec generation, and fixture benchmarks work. Scaffolding remains unfinished. Changelogs compare declared contracts without executing user migrations.
 
 - [x] Finish `pylon init` — generate typed contracts and a runnable example; scanning only suggests release labels
 - [ ] Finish `pylon scaffold` — generate real transform files (not TODO placeholders)
@@ -158,7 +158,7 @@ Pylon currently requires you to write transforms by hand. The long-term vision i
 
 - [ ] `pylon dashboard` — a local web UI showing all versions, their status (active/deprecated/sunset), and transform chains
 - [ ] Version analytics — track which API versions clients are hitting, deprecation adoption rate
-- [ ] `pylon changelog` — auto-generate a changelog from transform definitions (what changed between v1 and v2)
+- [x] `pylon generate changelog` — compare declared request/response schemas and list all registered hops in a release range
 
 ### Multi-service
 

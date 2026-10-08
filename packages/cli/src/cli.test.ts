@@ -91,6 +91,14 @@ describe('CLI on Node', () => {
         mode: 'pipeline',
         iterations: 10,
       });
+      const changelog = run('generate', 'changelog', 'v1..v2', '--json');
+      expect(changelog.status, changelog.stderr).toBe(0);
+      expect(JSON.parse(changelog.stdout).operations[0].response).toContainEqual(
+        expect.objectContaining({ type: 'added', field: '/properties/createdAt' }),
+      );
+      expect(run('generate', 'changelog', 'v1...v2', '-o', 'changes/v2.md').status).toBe(0);
+      expect(readFileSync(join(dir, 'changes/v2.md'), 'utf8')).toContain('### Response');
+      expect(run('generate', 'changelog', 'v1..v2..v3').status).toBe(1);
       const trace = run(
         'transform',
         'run',
@@ -181,7 +189,7 @@ describe('CLI on Node', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 20_000);
 
   it('generates OpenAPI and changes versions without stripping runtime config', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pylon-cli-node-'));

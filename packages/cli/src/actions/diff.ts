@@ -64,6 +64,24 @@ export async function diffAction(
 
 /** Diff JSON schema assertions, including nested fields and constraints. Renames require human intent. */
 export function diffSchemas(a: unknown, b: unknown, path = ''): SchemaChange[] {
+  return walkSchemas(a, b, path, true);
+}
+
+function sameValues(a: unknown[], b: unknown[]): boolean {
+  const left = new Set(a);
+  const right = new Set(b);
+  const contains = (values: Set<unknown>, value: unknown): boolean => {
+    if (values.has(value)) return true;
+    if (value === null || typeof value !== 'object') return false;
+    for (const candidate of values) if (isDeepStrictEqual(value, candidate)) return true;
+    return false;
+  };
+  for (const value of left) if (!contains(right, value)) return false;
+  for (const value of right) if (!contains(left, value)) return false;
+  return true;
+}
+
+function walkSchemas(a: unknown, b: unknown, path: string, schemaObject: boolean): SchemaChange[] {
   if (isDeepStrictEqual(a, b)) return [];
   if (
     a &&
@@ -77,13 +95,38 @@ export function diffSchemas(a: unknown, b: unknown, path = ''): SchemaChange[] {
     const right = b as Record<string, unknown>;
     const changes: SchemaChange[] = [];
     for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
-      if (['$schema', 'description', 'title'].includes(key)) continue;
+      if (schemaObject && ['$schema', 'description', 'title'].includes(key)) continue;
+      const oldValue = left[key];
+      const newValue = right[key];
+      if (
+        schemaObject &&
+        ['required', 'enum', 'type'].includes(key) &&
+        Array.isArray(oldValue) &&
+        Array.isArray(newValue) &&
+        sameValues(oldValue, newValue)
+      )
+        continue;
       const field = `${path}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
       if (!Object.hasOwn(left, key))
         changes.push({ type: 'added', field, details: JSON.stringify(right[key]) });
       else if (!Object.hasOwn(right, key))
         changes.push({ type: 'removed', field, details: JSON.stringify(left[key]) });
-      else changes.push(...diffSchemas(left[key], right[key], field));
+      else
+        changes.push(
+          ...walkSchemas(
+            oldValue,
+            newValue,
+            field,
+            !schemaObject ||
+              ![
+                'properties',
+                'patternProperties',
+                '$defs',
+                'definitions',
+                'dependentSchemas',
+              ].includes(key),
+          ),
+        );
     }
     return changes;
   }

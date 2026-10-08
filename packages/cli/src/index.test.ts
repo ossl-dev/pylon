@@ -15,7 +15,12 @@ import {
   extractSchemaShape,
   nameSimilarity,
 } from './actions/diff.js';
-import { buildChangelog, buildOpenAPISpec, extractVersions } from './actions/generate.js';
+import {
+  buildChangelog,
+  buildChangelogReport,
+  buildOpenAPISpec,
+  extractVersions,
+} from './actions/generate.js';
 import { generateDefaultConfig, generatePresetConfig, scanForVersions } from './actions/init.js';
 import { detectVersions, sanitizeFilename } from './actions/scaffold.js';
 import { ensureVersionsArray, sortVersions } from './actions/version.js';
@@ -417,6 +422,52 @@ describe('JSON schema diffs', () => {
   });
 });
 
+describe('schema keyword boundaries', () => {
+  it('handles large primitive enums and equivalent structured enum values', () => {
+    const values = Array.from({ length: 10_000 }, (_, i) => `value-${i}`);
+    expect(diffSchemas({ enum: values }, { enum: [...values].reverse() })).toEqual([]);
+    expect(diffSchemas({ enum: [{ a: 1, b: 2 }, null] }, { enum: [null, { b: 2, a: 1 }] })).toEqual(
+      [],
+    );
+  });
+  it('does not discard actual fields named description, title, or $schema', () => {
+    const changes = diffSchemas(
+      { properties: {} },
+      {
+        properties: {
+          description: { type: 'string' },
+          title: { type: 'number' },
+          $schema: { type: 'boolean' },
+        },
+      },
+    );
+    expect(changes.map((change) => change.field)).toEqual([
+      '/properties/description',
+      '/properties/title',
+      '/properties/$schema',
+    ]);
+    expect(
+      diffSchemas(
+        { properties: { description: { type: 'string' } } },
+        { properties: { description: { type: 'number' } } },
+      ),
+    ).toContainEqual(
+      expect.objectContaining({ field: '/properties/description/type', type: 'changed' }),
+    );
+  });
+  it('ignores annotation text and set ordering without hiding constraint changes', () => {
+    expect(
+      diffSchemas(
+        { description: 'old', required: ['a', 'b'], enum: ['a', 'b'], type: ['string', 'null'] },
+        { description: 'new', required: ['b', 'a'], enum: ['b', 'a'], type: ['null', 'string'] },
+      ),
+    ).toEqual([]);
+    expect(diffSchemas({ required: ['a'] }, { required: ['b'] })).toContainEqual(
+      expect.objectContaining({ field: '/required' }),
+    );
+  });
+});
+
 describe('extractSchemaShape', () => {
   it('returns a shape when the version key matches exactly', () => {
     const config = baseConfig({
@@ -778,37 +829,119 @@ describe('buildOpenAPISpec', () => {
 });
 
 describe('buildChangelog', () => {
-  it('produces a placeholder changelog without schemas', () => {
-    const changelog = buildChangelog('v1', 'v2', baseConfig());
-    expect(changelog).toContain('## Changes');
-    expect(changelog).toContain('No detailed changes detected.');
-    expect(changelog).toContain('---');
-    expect(changelog).toContain(
-      '_This changelog was auto generated. Review and update it with manual entries._',
+  function changelogConfig(overrides: Partial<PylonConfig> = {}): PylonConfig {
+    return baseConfig({ versions: ['v1', 'v2'], ...overrides });
+  }
+  it('compares independent endpoint request and response contracts without executing migrations', () => {
+    let calls = 0;
+    const config = changelogConfig({
+      endpoints: {
+        createUser: {
+          method: 'POST',
+          path: '/users',
+          contracts: {
+            v1: { request: z.object({ name: z.string() }), response: z.object({ id: z.number() }) },
+            v2: {
+              request: z.object({ fullName: z.string() }),
+              response: z.object({ id: z.number(), title: z.string() }),
+            },
+          },
+          transforms: {
+            'v1->v2': {
+              request: () => {
+                calls++;
+              },
+              response: () => {
+                calls++;
+              },
+            },
+          },
+        },
+      },
+    });
+    const report = buildChangelogReport('v1', 'v2', config);
+    expect(report.operations).toHaveLength(1);
+    expect(report.operations[0]).toMatchObject({
+      name: 'createUser',
+      method: 'POST',
+      path: '/users',
+      migrations: ['v1->v2'],
+    });
+    expect(report.operations[0]?.request).toContainEqual(
+      expect.objectContaining({ type: 'removed', field: '/properties/name' }),
     );
+    expect(report.operations[0]?.response).toContainEqual(
+      expect.objectContaining({ type: 'added', field: '/properties/title' }),
+    );
+    expect(calls).toBe(0);
+    expect(buildChangelog('v1', 'v2', config)).toContain('### Response');
   });
 
-  it('mentions schema comparison when schemas exist', () => {
-    const config = baseConfig({
+  it('resolves aliases and includes intermediate hops without prefix matches', () => {
+    const config = changelogConfig({
+      current: 'v4',
+      versions: [
+        { name: 'v1', order: 1, aliases: ['old'] },
+        { name: 'v2', order: 2 },
+        { name: 'v3', order: 3 },
+        { name: 'v4', order: 4 },
+      ],
+      transforms: {
+        'v1->v2': { request: 'identity' },
+        'v2->v3': { request: 'identity' },
+        'v3->v4': { request: 'identity' },
+        'v10->v11': { request: 'identity' },
+      },
+    });
+    expect(buildChangelogReport('old', 'v4', config)).toMatchObject({
+      source: 'v1',
+      target: 'v4',
+      operations: [{ migrations: ['v1->v2', 'v2->v3', 'v3->v4'] }],
+    });
+    expect(() => buildChangelog('v1-extra', 'v4', config)).toThrow('registered versions');
+  });
+
+  it('reports a newly introduced bodyless operation', () => {
+    const config = changelogConfig({
+      endpoints: {
+        health: { method: 'GET', path: '/health', minVersion: 'v2', contracts: { v2: {} } },
+      },
+    });
+    expect(buildChangelogReport('v1', 'v2', config).operations[0]).toMatchObject({
+      name: 'health',
+      availability: 'introduced',
+      request: [],
+      response: [],
+    });
+  });
+
+  it('reports the absence of declared schema changes', () => {
+    const changelog = buildChangelog('v1', 'v2', changelogConfig());
+    expect(changelog).toContain('No declared schema changes.');
+    expect(changelog).toContain('Review behavior and side effects separately.');
+  });
+
+  it('reports a contract missing from the target release', () => {
+    const config = changelogConfig({
       schemas: { v1: z.object({ name: z.string() }) },
     });
-    expect(buildChangelog('v1', 'v2', config)).toContain('## Schema Changes');
+    expect(buildChangelog('v1', 'v2', config)).toContain('Contract unavailable in v2.');
   });
 
   it('lists transforms that involve the source or target version', () => {
-    const config = baseConfig({
+    const config = changelogConfig({
       transforms: { 'v1->v2': { request: (input: unknown) => input } },
     });
     const changelog = buildChangelog('v1', 'v2', config);
-    expect(changelog).toContain('## Related Transforms');
+    expect(changelog).toContain('### Related Transforms');
     expect(changelog).toContain('- `v1->v2`');
   });
 
   it('omits transforms unrelated to the range', () => {
-    const config = baseConfig({
+    const config = changelogConfig({
       transforms: { 'v3->v4': { request: (input: unknown) => input } },
     });
-    expect(buildChangelog('v1', 'v2', config)).not.toContain('## Related Transforms');
+    expect(buildChangelog('v1', 'v2', config)).not.toContain('### Related Transforms');
   });
 });
 

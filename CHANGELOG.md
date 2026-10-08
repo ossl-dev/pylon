@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Generate real release contract changelogs as Markdown or JSON, including independent request/response changes and intermediate migration hops.
+- Fix schema diffs skipping fields named `description`, `title`, or `$schema`; ignore harmless ordering changes in required/enum/type sets.
+
 - Add `pylon.trace` and `transform run` dry-runs with detached per-hop snapshots, timings, fallback outcomes, and structured schema issue paths.
 - Fix CLI transform inspection for endpoint contracts and explicit identities; log continued migration errors when no error callback is installed.
 
@@ -50,5 +53,5 @@
 
 ### Known issues
 - Devtools Transform Playground is a stub
-- CLI scaffolding, changelog generation, and the playground remain unfinished
+- CLI scaffolding and the playground remain unfinished
 - No docs site yet
